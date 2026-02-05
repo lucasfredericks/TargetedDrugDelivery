@@ -1,0 +1,11 @@
+{
+  "id": "example-01",
+  "ligandCounts": [2, 1, 0, 1, 1, 1],
+  "toxicity": 2,
+  "tissues": [
+    { "name": "Tumor", "receptors": [0.8,0.6,0.2,0.1,0.05,0.1] },
+    { "name": "Heart", "receptors": [0.1,0.2,0.8,0.1,0.05,0.2] },
+    { "name": "Liver", "receptors": [0.05,0.1,0.2,0.8,0.6,0.2] },
+    { "name": "Lung", "receptors": [0.2,0.1,0.3,0.2,0.8,0.1] }
+  ]
+}

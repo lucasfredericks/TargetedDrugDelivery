@@ -1,0 +1,118 @@
+Targeted Drug Delivery Project description: 
+
+    This is an exhibit exploring how biomedical engineers target certain cell types. 
+
+    Target age: 10-14
+
+    Exhibit description: 
+        This is a puzzle exhibit. There are two stations: one for building and one for testing.
+        At the build station, users choose a puzzle board, which has a problem to be solved on it. 
+        Once they are done constructing their nanoparticle, they put the puzzle board into the "organ on a chip" testing station to see how well their molecule performs. 
+    
+        The puzzle works as follows:
+            Users are building a nanoparticle, which will deliver a chemotherapeutic drug molecule to target cancer cells. 
+            
+            Each particle has six ligands, and each ligand can be one of six colors. They may repeat colors. 
+            
+            The drug molecule in the center can be green, yellow, or red, corresponding to the toxicity of the molecule. 
+            Red is the strongest, yellow is medium, and green is weak.  (this aspect of the puzzle may be removed depending on user testing)
+            
+            Each puzzle shows receptor concentrations of 4 tissue types. All tissues have six different receptor types, corresponding to the six ligand colors.
+            One of the tissue types is a tumor, and the others are different organs (e.g. heart, liver, etc.)
+
+
+            The goal is to maximize toxicity in the tumor, while minimizing toxicity in the other tissues.
+            
+            Users must select ligands that will bind with the receptors in the tumor, while minimizing binding to the other tissues. 
+            In easy puzzles, the tumor tissue will have one or more receptor types that are much more highly concentrated than in any other tissue.
+            In that case, the solution will be to select ligands of that color and deliver a potent drug molecule. 
+            In harder puzzles, the tumor may not have a higher concentration of any one receptor, so users will have to select ligands of multiple colors to build up toxicity in the tumor while mitigating toxicity to other tissue types. e.g.: 
+                the heart has a high concentration of green receptors and a low concentration of red receptors,
+                the liver has a low concentration of green receptors and a high concentration of red receptors, 
+                the tumor has a high concentration of red and green receptors.
+                The user will have to choose a combination of green and red ligands such that the nanoparticle binds to tumor cells 
+                at twice the rate of either heart or lung cells.
+                This can be made more difficult with more tissues and closer margins, requiring the user to select ligands of different colors, 
+                and by carefully selecting the toxicity of the drug molecule. 
+
+        Scoring: 
+            In the prototype, the puzzle outcomes were calculated as follows. Each organ has six receptor concentration values between 0 and 1.
+            The nanoparticle has six ligand receptor concentration values, calculated as the number of ligands of each color. 
+            The drug toxicity value is a multiplier that corresponds to the color of the central hexagon. (green = 1, yellow = 2, red = 3). 
+            The toxicity score for each tissue was calculated by summing the product of each ligand - receptor concentration value, then multiplying 
+            by the drug toxicity value. The goal is to reach a tumor tissue toxicity > 1 while keeping the toxicity for each of the other tissues < 1.  
+
+            This approach performed well in user testing. In the final version, I would like to add a graphical fluid particle simulation showing dozens of copies of the user's nanoparticle flowing around cells and binding when matching receptor/ligand pairs meet. 
+            The receptor concentrations of the simulation must be updated to match each puzzle, and the ligand concentrations and drug molecule must match the solution on the user's puzzle board. 
+            Ideally the simulation results will come close to the mathematical scoring system in the prototype. Let's call this relationship "fidelity."
+
+            Fidelity: 
+                Some random variation seems desirable to match variation in real world experimental results. 
+                Too much variation will be confusing and frustrating for the user.
+                If there is too much variation:
+                    tweak the physics variables of the simulation
+                    add a probabalistic approach to binding events, updated in real time as a function of fidelity,
+
+
+        Puzzle boards:
+            Users will place colored tangram blocks into slots in their puzzle board. 
+            There is a central hexagon, which is the drug molecule. 
+            Around the outside, there are six equilateral triangles. Each has a point facing towards a facet of the hexagon. 
+            The puzzle parameters will be given in a graphic to be determined.
+            An embedded RFID tag will tell the testing station the puzzle's ID. 
+        
+        Testing station:
+            The testing station will be made to emulate "organ on a chip" technology. There will be four screens, each simulating a different tissue type. This can be accomplished by using one very powerful computer, capable of running a high count particle system simulation in effectively 4k, or 3-5 low-to-mid-range computers: one raspberry pi or similar to read the puzzle boards and send parameters to the other 2-4, which are each capable of running the simulation across one or two screens at 1080p each. 
+            The puzzle board will be identified with RFID, and the drug molecule and ligand blocks will be identified with computer vision or rgb sensors. 
+            
+
+        The prototype version of this software, written for the Processing sketchbook, can be found in the project directory under "java_prototype." 
+        
+        I am planning to do the final version in javascript, likely using p5.js. This should make it easy to communicate between machines in the likely event that one PC cannot handle all four simulations smoothly at the scale I would like. 
+
+    To do:
+        Card reader:
+            implement after working out simulation and puzzle mechanics
+        Simulation:
+            This should be the main focus for now. 
+            Build a software project, keeping flexibility in mind considering that this may have to be implemented between multiple machines. To that end, this should take a heavily modular, object oriented approach
+            
+            Figure out particle and fluid simulation. LiquidFun seems promising: https://google.github.io/liquidfun/
+            
+            Semi-realistic lipid bilayer cell membrane simulation. Can this be done in liquidfun/box2d also? 
+                maybe ToxicLibs (https://haptic-data.com/toxiclibsjs), but multiple physics engines seems unnecessarily complicated
+                Alternatively, interface directly with OpenGL. I don't really know how to do this
+
+            The nanoparticle doesn't have to look realistic. A mini version of the shape on the puzzle board (hex w/ 6 triangles) is better
+
+            Simulate receptors. (easy to understand > realistic)
+            
+            How is individual cell death within a tissue going to translate to issues of fidelity? How to measure fidelity anyway? 
+            
+            How does binding and attraction work? 
+
+            What is the workload between GPU and CPU? How many particles can it handle? LiquidFun seems very promising for this, but I don't know its limitations. e.g. can it handle custom forces between particles and ligands? 
+                modeling attraction of each receptor/ligand seems like a lot of overhead. 
+                cellular automata seems like the ideal approach, but have to work around limitations of hardware and my ability. 
+                A simple solution is to just create a single attractiveness score based on overall receptor/ligand affinity. 
+                    Sacrifices some realism, ideally you'd still want to show a [color] ligand binding with [color] receptor. Maybe this can be fudged. 
+            Add scoring system. (where does this go in the final exhibit? The testing station where you put in your puzzle probably needs a screen). 
+                Maybe percentage of cell death or percentage of bound pairs — shown with data viz (keep audience age in mind)
+                Needs a clear pass/fail outcome. It's less realistic, but showing a single cell of each type would be good for this. Hopefully can do something
+                bigger/better without sacrificing clear outcomes. 
+            Binding:
+                After binding, ideally the drug molecule should enter the cell. After some amount of accumulation, maybe show cell death --> maybe cell membrane bursts
+                Either binding or cell death is a scoring event. 
+
+        Puzzle:
+            Need to create a puzzle constructor tool where they could set receptor concentrations for each tissue, 
+            Need to be able to play test a solution (not with full simulation, but something that allows them to see the results a la the prototype).
+                Note that the simulation doesn't have to exactly match the mathematical scorekeeping of the prototype, as long as it keeps the same feeling/idea.
+                For that reason, this may have to be done after the simulation is substantially done. 
+            Need to be able to export the puzzle
+                relevant data is just an array of 6 floats (receptor concentrations). Maybe key value pairs if tissue names are important.
+                JSON, CSV, something else, or something custom? (I think this is trivial in javascript, but idk how to do it yet)
+
+
+
+

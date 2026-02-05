@@ -1,0 +1,1154 @@
+// sketch.js — minimal p5.js particle simulation with probabilistic binding
+let puzzle = null;
+let particles = [];
+let tissueAreas = [];
+// ligandPositions: length-6 array mapping each ligand slot to a color index (0-5) or -1 empty
+let ligandPositions = [-1,-1,-1,-1,-1,-1];
+// legacy ligandCounts (puzzle input may provide counts); use derived counts for scoring
+let ligandCounts = [0,0,0,0,0,0];
+let toxicity = 2; // default (yellow)
+let fidelity = 0.8; // 0..1 (1 = deterministic)
+let scoreboardDiv;
+let canvasMargin = 12;
+let areaGap = 50; // increased to fit two lines of text
+let particleSprite = null;
+let particleSpriteSize = 32;
+let cellsPerTissue = 15; // number of cells per tissue area
+let flowSpeed = 1.5; // base flow velocity from left to right
+let particleSpawnRate = 3; // particles to spawn per frame per tissue area
+let turbulenceScale = 0.005; // scale for noise-based turbulence
+let turbulenceStrength = 0.15; // strength of turbulent forces
+
+// Test mode variables
+let testMode = false;
+let testParticlesTotal = 0;
+let testParticlesReleased = 0;
+let testStartFrame = 0;
+let testDuration = 600; // frames over which to release particles (~10 seconds at 60fps)
+
+// Single-tissue mode flag
+let singleTissueMode = false;
+
+// Helper: read query string param in the page URL
+function getQueryParam(name) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.has(name) ? params.get(name) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function setup() {
+  // detect single-tissue mode via URL param `tissue` (0..3)
+  const tissueParam = parseInt(getQueryParam('tissue'));
+  const singleMode = !isNaN(tissueParam) && tissueParam >= 0 && tissueParam <= 3;
+  singleTissueMode = singleMode; // Store globally
+  const tissueIndex = singleMode ? tissueParam : null;
+
+  // layout: either single full-screen tissue, or 2x2 grid
+  const cols = singleMode ? 1 : 2;
+  const rows = singleMode ? 1 : 2;
+  const maxAreaWidth = 520; // cap each simulation width
+  // compute canvas size: if singleMode prefer 1920x1080 (bounded by window)
+  let cWidth, cHeight;
+  if (singleMode) {
+    cWidth = Math.min(windowWidth, 1920);
+    cHeight = Math.min(windowHeight, 1080);
+  } else {
+    const availableW = max(640, windowWidth - 2 * canvasMargin);
+    // choose area width so that cols fit with gaps
+    const areaWidth = min(maxAreaWidth, floor((availableW - (cols - 1) * areaGap - 2 * canvasMargin) / cols));
+    const areaHeight = floor(areaWidth * 9 / 16);
+    cWidth = cols * areaWidth + (cols - 1) * areaGap + canvasMargin * 2;
+    cHeight = rows * areaHeight + (rows - 1) * areaGap + canvasMargin * 2 + 40; // top labels
+  }
+
+  const canvas = createCanvas(cWidth, cHeight);
+  canvas.parent(document.body);
+  noStroke();
+
+  tissueAreas = [];
+  if (singleMode) {
+    // Single-tissue mode: render at full resolution directly to canvas
+    // Use a buffer at native canvas resolution
+    const buf = createGraphics(width, height);
+    buf.noStroke();
+
+    tissueAreas.push({
+      x: 0, y: 0, w: width, h: height,
+      renderW: width, renderH: height,
+      name: 'T' + (tissueIndex+1),
+      receptors: [0,0,0,0,0,0],
+      bound:0, attempts:0,
+      tissueIndex: tissueIndex,
+      cells: [],
+      buffer: buf
+    });
+  } else {
+    // 2x2 layout - each renders at 1920x1080 then downscales for display
+    const availableW = max(640, windowWidth - 2 * canvasMargin);
+    const areaWidth = min(maxAreaWidth, floor((availableW - (cols - 1) * areaGap - 2 * canvasMargin) / cols));
+    const areaHeight = floor(areaWidth * 9 / 16);
+
+    // Full resolution for rendering
+    const renderW = 1920;
+    const renderH = 1080;
+
+    for (let r = 0; r < rows; r++){
+      for (let c = 0; c < cols; c++){
+        const x = canvasMargin + c * (areaWidth + areaGap);
+        const y = canvasMargin + 32 + r * (areaHeight + areaGap);
+        const idx = r * cols + c;
+
+        // Create off-screen buffer at full resolution
+        const buf = createGraphics(renderW, renderH);
+        buf.noStroke();
+
+        tissueAreas.push({
+          x: x, y: y, w: areaWidth, h: areaHeight,
+          renderW: renderW, renderH: renderH,
+          name: 'T' + (idx+1),
+          receptors: [0,0,0,0,0,0],
+          bound:0, attempts:0,
+          cells: [],
+          buffer: buf
+        });
+      }
+    }
+  }
+
+  // Generate cells for each tissue area (using renderW/renderH dimensions)
+  for (let i = 0; i < tissueAreas.length; i++) {
+    generateCellsForArea(tissueAreas[i]);
+  }
+
+  // wire DOM
+  const loadBtn = document.getElementById('loadPuzzle');
+  const resetBtn = document.getElementById('resetSim');
+  const fidEl = document.getElementById('fidelity');
+  if (loadBtn) loadBtn.onclick = () => loadPuzzle();
+  if (resetBtn) resetBtn.onclick = () => resetSim();
+  if (fidEl) fidEl.oninput = (e)=> { fidelity = parseFloat(e.target.value); };
+
+  scoreboardDiv = document.getElementById('scoreboard');
+  // Don't generate particles on startup - wait for Test button
+  // generateParticles(singleMode ? 300 : 200);
+  // try to auto-load example
+  fetch('puzzle_example.json').then(r=>r.json()).then(j=> { applyPuzzle(j); updateScoreboard(); }).catch(()=>{});
+  // initial nanoparticle preview draw (only if preview exists)
+  if (document.getElementById('npPreview')) drawNanoparticlePreview();
+  // setup ligand selectors UI if present (dashboard)
+  if (document.querySelectorAll('.ligandSelect').length > 0) setupLigandSelectors();
+  // generate particle sprite for current ligandPositions
+  regenerateParticleSprite(particleSpriteSize);
+
+  // Listen for dashboard messages via BroadcastChannel so this page (simulation) can receive params
+  try {
+    const chan = new BroadcastChannel('tdd-channel');
+    console.log('Simulation: BroadcastChannel created');
+    chan.onmessage = (ev) => {
+      const msg = ev.data || {};
+      console.log('Simulation received message:', msg.type, msg.command || '');
+      if (msg.type === 'test') {
+        // Start test mode
+        console.log('Starting test mode with', msg.totalParticles, 'particles');
+        testMode = true;
+        testParticlesTotal = msg.totalParticles || 1000;
+        testParticlesReleased = 0;
+        testStartFrame = frameCount;
+        // Clear particles and reset binding states
+        particles = [];
+        for (let a of tissueAreas) {
+          a.bound = 0;
+          a.attempts = 0;
+          for (let cell of a.cells) {
+            cell.bound = 0;
+            if (cell.receptorObjects) {
+              for (let receptor of cell.receptorObjects) {
+                receptor.bound = false;
+              }
+            }
+          }
+        }
+        updateScoreboard();
+      } else if (msg.type === 'params'){
+        if (Array.isArray(msg.ligandPositions)){
+          ligandPositions = msg.ligandPositions.slice(0,6);
+        }
+        if (typeof msg.toxicity === 'number') toxicity = msg.toxicity;
+        if (typeof msg.fidelity === 'number') fidelity = msg.fidelity;
+        if (msg.puzzle) {
+          // Use applyPuzzle instead to properly handle tissue mapping
+          applyPuzzle(msg.puzzle);
+        }
+        // regen sprite
+        regenerateParticleSprite(particleSpriteSize);
+        if (msg.command === 'reset') resetSim();
+        // dashboard requests a full restart (reset scores, exit test mode)
+        if (msg.command === 'restart'){
+          resetSim();
+          updateScoreboard();
+        }
+      }
+    };
+  } catch(e){
+    // BroadcastChannel not available — fall back to no-op
+  }
+}
+
+// Generate organic cell shapes using perlin noise for naturalistic appearance
+function generateOrganicCellShape(cx, cy, baseRadius, seed) {
+  const points = [];
+  const numPoints = 32; // resolution of cell outline
+
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (i / numPoints) * TWO_PI;
+    // Use perlin noise to create organic variation in radius
+    const noiseVal = noise(cos(angle) * 2 + seed, sin(angle) * 2 + seed);
+    const radiusVariation = map(noiseVal, 0, 1, 0.8, 1.2);
+    const r = baseRadius * radiusVariation;
+    points.push({
+      x: cx + cos(angle) * r,
+      y: cy + sin(angle) * r
+    });
+  }
+  return points;
+}
+
+// Distribute cells across tissue area with natural spacing
+function generateCellsForArea(area) {
+  area.cells = [];
+  // Use renderW/renderH for cell generation (full resolution space)
+  const renderW = area.renderW || area.w;
+  const renderH = area.renderH || area.h;
+  const minCellRadius = min(renderW, renderH) * 0.08;
+  const maxCellRadius = min(renderW, renderH) * 0.12;
+  const padding = minCellRadius * 0.5; // minimum space between cells
+  const attempts = 200; // maximum placement attempts
+
+  for (let i = 0; i < cellsPerTissue; i++) {
+    let placed = false;
+    let attemptCount = 0;
+
+    while (!placed && attemptCount < attempts) {
+      // Random position within render space bounds (with margin)
+      // For multi-tissue mode with buffers, position in buffer space (0,0 to renderW,renderH)
+      // For single-tissue mode, position in canvas space
+      const margin = maxCellRadius + 10;
+      const cx = random(margin, renderW - margin);
+      const cy = random(margin, renderH - margin);
+      const radius = random(minCellRadius, maxCellRadius);
+
+      // Check if this position overlaps with existing cells
+      let overlaps = false;
+      for (let cell of area.cells) {
+        const d = dist(cx, cy, cell.cx, cell.cy);
+        if (d < radius + cell.radius + padding) {
+          overlaps = true;
+          break;
+        }
+      }
+
+      if (!overlaps) {
+        // Generate organic shape for this cell
+        const seed = random(1000);
+        const shape = generateOrganicCellShape(cx, cy, radius, seed);
+        area.cells.push({
+          cx: cx,
+          cy: cy,
+          radius: radius,
+          shape: shape,
+          receptorObjects: null,
+          bound: 0
+        });
+        placed = true;
+      }
+      attemptCount++;
+    }
+  }
+}
+
+function generateParticles(n){
+  particles = [];
+  const perArea = max(12, floor(n / tissueAreas.length));
+  for (let i=0;i<tissueAreas.length;i++){
+    const a = tissueAreas[i];
+    for (let j=0;j<perArea;j++){
+      // Spawn particles distributed across the width for initial state
+      const spawnX = random(a.x, a.x + a.w);
+      spawnParticleInArea(i, spawnX);
+    }
+  }
+}
+
+// Spawn a single particle in the given tissue area at the specified x position
+function spawnParticleInArea(areaIndex, spawnX = null) {
+  const a = tissueAreas[areaIndex];
+
+  // Use render dimensions for particle positioning
+  const renderW = a.renderW || a.w;
+  const renderH = a.renderH || a.h;
+
+  // If no x position specified, spawn off-screen to the left
+  // Particles are positioned in render space (0 to renderW/renderH)
+  const x = spawnX !== null ? spawnX : -20;
+  const y = random(10, renderH - 10);
+
+  // Base flow velocity left-to-right with minimal initial turbulence
+  // (continuous turbulence will be applied via noise field)
+  const baseVx = flowSpeed;
+  const turbulenceX = random(-0.2, 0.2);
+  const turbulenceY = random(-0.3, 0.3);
+
+  particles.push({
+    area: areaIndex,
+    x: x,
+    y: y,
+    vx: baseVx + turbulenceX,
+    vy: turbulenceY,
+    angle: random(TWO_PI),
+    angVel: random(-0.03, 0.03),
+    scale: 1,
+    bound: false,
+    cellIndex: -1
+  });
+}
+
+// Allocate Y-shaped receptors around a cell membrane.
+// receptors: array[6] concentrations (0..1)
+// shape: array of {x,y} points defining the cell boundary
+// cx,cy: center of cell; radius: approximate radius
+// Returns array of receptor objects: { baseX, baseY, tipX, tipY, color }
+function allocateYReceptorsForCell(receptors, shape, cx, cy, radius){
+  const maxPerColor = 40; // doubled from 20 to increase binding opportunities
+  const out = [];
+
+  // Calculate total receptors needed
+  let totalReceptors = 0;
+  for (let color = 0; color < 6; color++) {
+    totalReceptors += Math.round((receptors[color] || 0) * maxPerColor);
+  }
+
+  if (totalReceptors === 0 || !shape || shape.length === 0) return out;
+
+  // Distribute receptors around the cell outline
+  const numShapePoints = shape.length;
+  const indices = [];
+  for (let i = 0; i < numShapePoints; i++) indices.push(i);
+
+  // Shuffle indices for random distribution
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = indices[i]; indices[i] = indices[j]; indices[j] = t;
+  }
+
+  let pointIdx = 0;
+  for (let color = 0; color < 6; color++) {
+    const count = Math.round((receptors[color] || 0) * maxPerColor);
+    for (let k = 0; k < count; k++) {
+      if (pointIdx >= indices.length) break;
+
+      const shapeIdx = indices[pointIdx++];
+      const point = shape[shapeIdx];
+      const baseX = point.x;
+      const baseY = point.y;
+
+      // Calculate outward direction from cell center
+      const dx = baseX - cx;
+      const dy = baseY - cy;
+      const dist = sqrt(dx * dx + dy * dy) || 1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      // Receptor stems point outward
+      const branchLen = min(6, radius * 0.15);
+      const stemLen = branchLen * 2;
+      const tipX = baseX + nx * stemLen;
+      const tipY = baseY + ny * stemLen;
+
+      out.push({ baseX, baseY, tipX, tipY, color, nx, ny, branchLen, bound: false });
+    }
+  }
+  return out;
+}
+
+// Draw particles for a specific area to a graphics context
+function renderParticlesForArea(g, areaIndex, area) {
+  const spriteDisplaySize = particleSpriteSize;
+
+  for (let p of particles) {
+    if (p.area !== areaIndex) continue;
+
+    if (p.bound) {
+      // draw faded sprite at binding location
+      if (particleSprite) {
+        g.push();
+        g.translate(p.x, p.y);
+        g.rotate(p.angle || 0);
+        g.tint(255, 180);
+        g.imageMode(CENTER);
+        g.image(particleSprite, 0, 0, spriteDisplaySize, spriteDisplaySize);
+        g.noTint();
+        g.pop();
+      }
+    } else {
+      // draw sprite representing the user's nanoparticle
+      if (particleSprite) {
+        g.push();
+        g.translate(p.x, p.y);
+        g.rotate(p.angle || 0);
+        g.imageMode(CENTER);
+        g.image(particleSprite, 0, 0, spriteDisplaySize, spriteDisplaySize);
+        g.pop();
+      } else {
+        // fallback: draw simple circle
+        g.fill(120);
+        g.circle(p.x, p.y, 4);
+      }
+    }
+  }
+}
+
+// Render a single tissue area to a graphics context
+// g: graphics context (main canvas or buffer)
+// area: tissue area object
+// renderToBuffer: true if rendering to off-screen buffer (use full space), false if rendering directly
+// areaIndex: index of the tissue area (for particle filtering)
+function renderTissueArea(g, area, renderToBuffer, areaIndex) {
+  const renderW = renderToBuffer ? area.renderW : area.w;
+  const renderH = renderToBuffer ? area.renderH : area.h;
+  const offsetX = renderToBuffer ? 0 : area.x;
+  const offsetY = renderToBuffer ? 0 : area.y;
+
+  g.push();
+
+  // Background
+  g.fill(240, 240, 255);
+  g.rect(offsetX, offsetY, renderW, renderH, 6);
+
+  // Draw flow direction indicators (subtle arrows)
+  g.stroke(200, 200, 220, 100);
+  g.strokeWeight(1);
+  const numArrows = 5;
+  const arrowSpacing = renderH / (numArrows + 1);
+  const arrowLength = 20;
+  const offset = (frameCount * 0.5) % 40; // animated flow
+  for (let j = 0; j < numArrows; j++) {
+    const arrowY = offsetY + arrowSpacing * (j + 1);
+    const numArrowsInRow = floor(renderW / 40);
+    for (let k = 0; k < numArrowsInRow; k++) {
+      const arrowX = offsetX + k * 40 - offset;
+      if (arrowX > offsetX - 20 && arrowX < offsetX + renderW + 20) {
+        g.line(arrowX, arrowY, arrowX + arrowLength, arrowY);
+        // Arrow head
+        g.line(arrowX + arrowLength, arrowY, arrowX + arrowLength - 4, arrowY - 2);
+        g.line(arrowX + arrowLength, arrowY, arrowX + arrowLength - 4, arrowY + 2);
+      }
+    }
+  }
+  g.noStroke();
+
+  // Draw multiple organic cells in this tissue area
+  for (let cellIdx = 0; cellIdx < area.cells.length; cellIdx++) {
+    const cell = area.cells[cellIdx];
+
+    // Allocate receptors for this cell if needed
+    if (!cell.receptorObjects) {
+      cell.receptorObjects = allocateYReceptorsForCell(
+        area.receptors || [0,0,0,0,0,0],
+        cell.shape,
+        cell.cx,
+        cell.cy,
+        cell.radius
+      );
+    }
+
+    // Draw cell membrane outline with organic shape
+    g.fill(220, 230, 240, 180);
+    g.stroke(100, 100, 120, 120);
+    g.strokeWeight(2);
+    g.beginShape();
+    for (let pt of cell.shape) {
+      g.vertex(pt.x, pt.y);
+    }
+    g.endShape(CLOSE);
+    g.noStroke();
+
+    // Draw Y-shaped receptors
+    const reps = cell.receptorObjects || [];
+    for (let r of reps) {
+      const bx = r.baseX, by = r.baseY, tx = r.tipX, ty = r.tipY;
+      g.strokeWeight(2);
+      if (r.bound) {
+        g.stroke(150, 150, 150, 120);
+      } else if (typeof r.color === 'number' && r.color >= 0) {
+        g.stroke(colorForIndex(r.color));
+      } else {
+        g.stroke(0);
+      }
+      g.line(bx, by, tx, ty);
+      const ang = atan2(r.ny, r.nx);
+      const branchLen = r.branchLen || 6;
+      const a1 = ang + PI/6; const a2 = ang - PI/6;
+      const b1x = tx + cos(a1) * branchLen; const b1y = ty + sin(a1) * branchLen;
+      const b2x = tx + cos(a2) * branchLen; const b2y = ty + sin(a2) * branchLen;
+      g.line(tx, ty, b1x, b1y); g.line(tx, ty, b2x, b2y);
+      g.noStroke();
+    }
+
+    // Display binding percentage in test mode
+    if (testMode && reps.length > 0) {
+      const boundReceptors = reps.filter(r => r.bound).length;
+      const totalReceptors = reps.length;
+      const percentage = (boundReceptors / totalReceptors * 100).toFixed(1);
+
+      const boxW = 50;
+      const boxH = 24;
+      g.fill(255, 255, 255, 220);
+      g.stroke(0, 0, 0, 200);
+      g.strokeWeight(1.5);
+      g.rectMode(CENTER);
+      g.rect(cell.cx, cell.cy, boxW, boxH, 4);
+      g.noStroke();
+
+      g.fill(0, 0, 0, 255);
+      g.textSize(14);
+      g.textAlign(CENTER, CENTER);
+      g.textStyle(BOLD);
+      g.text(`${percentage}%`, cell.cx, cell.cy);
+      g.textStyle(NORMAL);
+      g.rectMode(CORNER);
+    }
+  }
+
+  // Draw particles for this area
+  renderParticlesForArea(g, areaIndex, area);
+
+  g.pop();
+}
+
+function draw(){
+  background(250);
+
+  // Render each tissue area to its buffer then composite to main canvas
+  for (let i=0;i<tissueAreas.length;i++){
+    let a = tissueAreas[i];
+
+    // Render to buffer at full resolution
+    a.buffer.background(250);
+    renderTissueArea(a.buffer, a, true, i);
+
+    // Draw the buffer to main canvas (scaled if multi-tissue, 1:1 if single-tissue)
+    image(a.buffer, a.x, a.y, a.w, a.h);
+
+    // Draw labels on main canvas
+    if (!singleTissueMode) {
+      // Only show labels in multi-tissue mode (single-tissue labels handled separately)
+      fill(0);
+      textSize(14);
+      textAlign(LEFT, TOP);
+      text(a.name, a.x + 8, a.y - 22);
+
+      // Display dual metrics
+      const counts = computeLigandCountsFromPositions();
+      const theoreticalScore = scoreTissue(counts, a.receptors, toxicity);
+      let totalReceptors = 0;
+      let boundReceptors = 0;
+      for (let cell of a.cells) {
+        if (cell.receptorObjects) {
+          totalReceptors += cell.receptorObjects.length;
+          boundReceptors += cell.receptorObjects.filter(r => r.bound).length;
+        }
+      }
+      const bindingPct = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100).toFixed(1) : 0;
+      textSize(12);
+      text(`Theory: ${theoreticalScore.toFixed(2)} | Actual: ${bindingPct}% (${a.bound||0} bound)`, a.x+8, a.y - 6);
+    }
+  }
+
+  // Spawn new particles flowing from the left
+  if (testMode) {
+    // Test mode: release particles with a smooth bell curve over testDuration frames
+    const elapsedFrames = frameCount - testStartFrame;
+    if (testParticlesReleased === 0 && elapsedFrames === 0) {
+      console.log('Test mode active: starting particle release');
+    }
+    if (testParticlesReleased < testParticlesTotal && elapsedFrames < testDuration) {
+      // Use a sine-based curve for smooth start and end
+      // Use cumulative distribution: integral of sin from 0 to progress
+      // Integral of sin(x*π) = -cos(x*π)/π, evaluated from 0 to progress
+      // This gives (1 - cos(progress*π)) / 2 as the fraction released
+      const progress = elapsedFrames / testDuration;
+      const targetReleased = Math.floor(testParticlesTotal * (1 - Math.cos(progress * Math.PI)) / 2);
+      const particlesToSpawn = Math.max(0, targetReleased - testParticlesReleased);
+
+      // Distribute particles across all tissue areas
+      let spawned = 0;
+      for (let i = 0; i < tissueAreas.length && spawned < particlesToSpawn; i++) {
+        const particlesPerArea = Math.ceil((particlesToSpawn - spawned) / (tissueAreas.length - i));
+        for (let j = 0; j < particlesPerArea && testParticlesReleased < testParticlesTotal && spawned < particlesToSpawn; j++) {
+          spawnParticleInArea(i);
+          testParticlesReleased++;
+          spawned++;
+        }
+      }
+    } else if (testParticlesReleased >= testParticlesTotal) {
+      // Test complete - could exit test mode or keep monitoring
+      // For now, keep test mode active to show final stats
+    }
+  }
+  // No else case - particles only spawn during test mode
+
+  // update particles (confined to their area)
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    const a = tissueAreas[p.area];
+    const renderW = a.renderW || a.w;
+    const renderH = a.renderH || a.h;
+
+    if (p.bound) {
+      // Bound particles don't move - they'll be drawn later
+      continue;
+    }
+
+    // Update position with flow
+    p.x += p.vx;
+    p.y += p.vy;
+    p.angle += p.angVel;
+
+    // Remove particles that leave the render bounds
+    const margin = 50; // cleanup margin beyond visible area
+    if (p.x > renderW + margin ||
+        p.x < -margin ||
+        p.y > renderH + margin ||
+        p.y < -margin) {
+      particles.splice(i, 1);
+      continue;
+    }
+
+    // Soft boundary forces (push particles back into channel smoothly)
+    const boundaryMargin = 20;
+    const boundaryForce = 0.3;
+
+    if (p.y < boundaryMargin) {
+      const dist = boundaryMargin - p.y;
+      p.vy += (dist / boundaryMargin) * boundaryForce;
+    }
+    if (p.y > renderH - boundaryMargin) {
+      const dist = p.y - (renderH - boundaryMargin);
+      p.vy -= (dist / boundaryMargin) * boundaryForce;
+    }
+
+    // Check collision with any cell in this tissue area
+    const spriteRadius = particleSpriteSize * 0.5;
+    let nearestCell = null;
+    let nearestCellDist = Infinity;
+
+    for (let cellIdx = 0; cellIdx < a.cells.length; cellIdx++) {
+      const cell = a.cells[cellIdx];
+      const d = dist(p.x, p.y, cell.cx, cell.cy);
+      const collisionDistance = cell.radius + spriteRadius + 2;
+
+      if (d < collisionDistance && d < nearestCellDist) {
+        nearestCell = cell;
+        nearestCellDist = d;
+        p.cellIndex = cellIdx;
+      }
+    }
+
+    // If particle is near a cell, check for binding
+    if (nearestCell) {
+      const counts = computeLigandCountsFromPositions();
+      const reps = nearestCell.receptorObjects || [];
+      const receptorHitRadius = nearestCell.radius * 0.3 + spriteRadius;
+      let hasLocalMatch = false;
+
+      // Check if particle is near a matching receptor (only unbound receptors)
+      for (let r of reps) {
+        if (!r.bound && typeof r.color === 'number' && r.color >= 0) {
+          if ((counts[r.color] || 0) > 0) {
+            const dtip = dist(p.x, p.y, r.tipX, r.tipY);
+            if (dtip <= receptorHitRadius) {
+              hasLocalMatch = true;
+              break;
+            }
+          }
+        }
+      }
+
+      let prob = 0;
+      if (hasLocalMatch) prob = bindingProbabilityForParticle(counts, a.receptors, toxicity, fidelity);
+      a.attempts = (a.attempts || 0) + 1;
+
+      if (prob > 0 && random() < prob) {
+        // Bind: place particle at the nearest matching unbound receptor tip
+        let nearest = null;
+        let nd = 1e9;
+        for (let r of reps) {
+          if (!r.bound && typeof r.color === 'number' && r.color >= 0 && (counts[r.color] || 0) > 0) {
+            const dtip = dist(p.x, p.y, r.tipX, r.tipY);
+            if (dtip < nd) {
+              nd = dtip;
+              nearest = r;
+            }
+          }
+        }
+        if (nearest) {
+          // Place particle just outside the receptor tip
+          const offsetDist = particleSpriteSize * 0.5 + 2;
+          p.x = nearest.tipX + nearest.nx * offsetDist;
+          p.y = nearest.tipY + nearest.ny * offsetDist;
+          p.vx = 0; p.vy = 0; p.angVel = 0;
+          p.bound = true;
+          p.angle = atan2(nearest.ny, nearest.nx);
+          nearest.bound = true; // Mark this receptor as bound
+          a.bound = (a.bound || 0) + 1;
+          nearestCell.bound = (nearestCell.bound || 0) + 1;
+        }
+      } else {
+        // No matching receptor -> deflect around cell while maintaining flow
+        const dx = p.x - nearestCell.cx;
+        const dy = p.y - nearestCell.cy;
+        const d = sqrt(dx * dx + dy * dy) || 0.0001;
+        const nx = dx / d;
+        const ny = dy / d;
+
+        // Push particle outside collision radius
+        const pushOut = nearestCell.radius + spriteRadius + 2;
+        p.x = nearestCell.cx + nx * pushOut;
+        p.y = nearestCell.cy + ny * pushOut;
+
+        // Deflect velocity to flow around the cell (maintain rightward flow)
+        const vDotN = p.vx * nx + p.vy * ny;
+        if (vDotN < 0) {
+          // Reflect velocity but bias toward rightward flow
+          p.vx = p.vx - 2 * vDotN * nx;
+          p.vy = p.vy - 2 * vDotN * ny;
+
+          // Ensure rightward component is maintained
+          if (p.vx < flowSpeed * 0.5) {
+            p.vx = flowSpeed * 0.5 + random(0.2);
+          }
+        }
+      }
+    }
+
+    // Apply continuous turbulence using Perlin noise (simulate fluid dynamics)
+    if (!p.bound) {
+      // Use Perlin noise to create smooth, flowing turbulence
+      const noiseX = noise(p.x * turbulenceScale, p.y * turbulenceScale, frameCount * 0.01);
+      const noiseY = noise(p.x * turbulenceScale + 1000, p.y * turbulenceScale, frameCount * 0.01);
+
+      // Map noise (0-1) to turbulent forces (-1 to 1)
+      const turbulentForceX = (noiseX - 0.5) * 2 * turbulenceStrength * 0.1; // Dampened x-axis
+      const turbulentForceY = (noiseY - 0.5) * 2 * turbulenceStrength * 0.3;
+
+      // Apply turbulent forces
+      p.vx += turbulentForceX;
+      p.vy += turbulentForceY;
+
+      // Gentle drift back toward base flow speed (but keep turbulence)
+      p.vx = lerp(p.vx, flowSpeed, 0.01);
+
+      // Add slight damping to prevent runaway velocities
+      const maxSpeed = flowSpeed * 2;
+      const speed = sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (speed > maxSpeed) {
+        p.vx = (p.vx / speed) * maxSpeed;
+        p.vy = (p.vy / speed) * maxSpeed;
+      }
+    }
+
+    // Particle rendering moved to renderParticlesToContext function
+  }
+
+  // Display particle count at bottom of screen
+  fill(60);
+  noStroke();
+  textSize(14);
+  textAlign(CENTER, BOTTOM);
+  const boundCount = particles.filter(p => p.bound).length;
+  const freeCount = particles.length - boundCount;
+
+  if (testMode) {
+    text(`TEST MODE: ${testParticlesReleased}/${testParticlesTotal} released | Particles: ${particles.length} (${freeCount} flowing, ${boundCount} bound)`, width / 2, height - 8);
+  } else {
+    text(`Ready. Press Test button on dashboard to begin.`, width / 2, height - 8);
+  }
+
+  // Display scoreboard metrics at bottom in single-tissue mode
+  if (singleTissueMode && puzzle && tissueAreas.length > 0) {
+    const area = tissueAreas[0];
+    const puzzleIndex = (typeof area.tissueIndex === 'number') ? area.tissueIndex : 0;
+    const tissue = puzzle.tissues[puzzleIndex];
+
+    if (tissue) {
+      const counts = computeLigandCountsFromPositions();
+      const theoreticalScore = scoreTissue(counts, area.receptors, toxicity);
+
+      // Calculate actual binding percentage
+      let totalReceptors = 0;
+      let boundReceptors = 0;
+      for (let cell of area.cells) {
+        if (cell.receptorObjects) {
+          totalReceptors += cell.receptorObjects.length;
+          boundReceptors += cell.receptorObjects.filter(r => r.bound).length;
+        }
+      }
+      const bindingPct = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100).toFixed(1) : 0;
+
+      // Display on canvas at bottom
+      fill(255, 255, 255, 230);
+      stroke(60);
+      strokeWeight(2);
+      const boxW = 600;
+      const boxH = 60;
+      const boxX = width / 2 - boxW / 2;
+      const boxY = height - boxH - 40;
+      rect(boxX, boxY, boxW, boxH, 4);
+      noStroke();
+
+      fill(0);
+      textSize(18);
+      textAlign(CENTER, TOP);
+      text(`${tissue.name}`, width / 2, boxY + 8);
+
+      textSize(14);
+      text(`Theory: ${theoreticalScore.toFixed(2)} | Actual: ${bindingPct}% (${area.bound||0} particles bound)`, width / 2, boxY + 32);
+    }
+  }
+}
+
+function bindingProbabilityForParticle(ligandCounts, receptors, toxicityMult, fidelityParam){
+  // Use the deterministic prototype scoring formula: sum(ligandCount[i] * receptor[i]) * toxicityMult
+  // Ligand and receptor indices correspond by color.
+  let sum = 0;
+  let totalLigands = 0;
+  for (let i=0;i<6;i++){
+    const lc = (ligandCounts[i]||0);
+    totalLigands += lc;
+    sum += lc * (receptors[i]||0);
+  }
+  // If there are no ligands or no matching ligand-receptor pairs (sum==0), particle cannot bind
+  if (totalLigands === 0 || sum <= 1e-9) return 0;
+  const tox = (toxicityMult || 1);
+  let attractiveness = sum * tox; // matches scoreTissue()
+
+  // Use square root curve to make high scores more effective
+  // Max theoretical score is 6 ligands * 1.0 receptors * 3 toxicity = 18
+  // Normalize and apply power curve
+  const normalizedScore = attractiveness / 18;
+  let baseP = Math.sqrt(normalizedScore); // Square root gives better mapping
+  baseP = constrain(baseP, 0, 1);
+
+  // At maximum fidelity, make binding deterministic
+  if (fidelityParam >= 0.99) {
+    return baseP;
+  }
+
+  // Add fidelity-driven noise (lower fidelity => more randomness)
+  const noiseScale = 0.15; // reduced from 0.2 for better predictability
+  let noise = (1 - fidelityParam) * noiseScale * (random() - 0.5) * 2;
+  let p = constrain(baseP + noise, 0, 1);
+  return p;
+}
+
+function colorForIndex(i){
+  const cols = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'];
+  return cols[i%cols.length];
+}
+
+// Draw a small nanoparticle at (x,y) using p5 drawing commands
+function drawMiniNanoparticle(x, y, size, positions, toxicityVal, faded=false, angle=0){
+  // kept for compatibility; prefer using sprite rendering via `particleSprite`.
+}
+
+// helper to convert color index to p5 color object for lerp
+function getComputedColor(idx){
+  const cols = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'];
+  const c = cols[(idx%6+6)%6];
+  return color(c);
+}
+
+// regenerate particle sprite graphics based on current ligandPositions and toxicity
+function regenerateParticleSprite(size){
+  if (typeof createGraphics !== 'function') return;
+  const g = createGraphics(size, size);
+  g.pixelDensity(1);
+  g.clear();
+  g.push();
+  g.translate(size/2, size/2);
+  // compute a safe hex radius so triangles fit inside the sprite bounds
+  const pad = 2;
+  const maxR = size/2 - pad;
+  const cos30 = Math.cos(Math.PI/6);
+  // choose hexR so that baseCenterDist = apothem - 1 + triH <= maxR
+  // triH is approx hexR * 0.95; apothem = hexR * cos30
+  const denom = (cos30 + 0.95);
+  let hexR = Math.min(size * 0.35, Math.max(4, (maxR + 1) / denom));
+  const apothem = hexR * cos30;
+  const arrangement = ligandPositions.slice(0,6);
+  // draw equilateral triangles (ligands) — use triangle() and no stroke to avoid artifacts
+  for (let i=0;i<6;i++){
+    const mid = -Math.PI/2 + (i + 0.5) * TWO_PI/6;
+    const triH = hexR * 0.7; // triangle height (reduced to ensure fit)
+    const triS = (2 * triH) / Math.sqrt(3); // side length for equilateral
+    const halfBase = triS / 2;
+    const tipDist = apothem - 1;
+    const baseCenterDist = tipDist + triH;
+    const tipX = Math.cos(mid) * tipDist;
+    const tipY = Math.sin(mid) * tipDist;
+    const baseCenterX = Math.cos(mid) * baseCenterDist;
+    const baseCenterY = Math.sin(mid) * baseCenterDist;
+    const px = Math.cos(mid + Math.PI/2);
+    const py = Math.sin(mid + Math.PI/2);
+    const baseAx = baseCenterX + px * halfBase;
+    const baseAy = baseCenterY + py * halfBase;
+    const baseBx = baseCenterX - px * halfBase;
+    const baseBy = baseCenterY - py * halfBase;
+    const colorIdx = arrangement[i];
+    g.noStroke();
+    if (colorIdx === -1) g.fill('#e6e6e6'); else g.fill(colorForIndex(colorIdx));
+    g.triangle(tipX, tipY, baseAx, baseAy, baseBx, baseBy);
+  }
+  // central hexagon
+  g.fill(toxicity === 3 ? '#b30000' : (toxicity === 2 ? '#ffd11a' : '#8fd14f'));
+  g.stroke('#222'); g.strokeWeight(0.6);
+  g.beginShape();
+  for (let i=0;i<6;i++){
+    const a = -PI/2 + i * TWO_PI/6;
+    const vx = Math.cos(a) * hexR;
+    const vy = Math.sin(a) * hexR;
+    g.vertex(vx, vy);
+  }
+  g.endShape(CLOSE);
+  g.noStroke();
+  g.pop();
+  particleSprite = g;
+}
+
+// Draw a simple nanoparticle preview (central hexagon + 6 triangles)
+function drawNanoparticlePreview(){
+  const c = document.getElementById('npPreview');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  ctx.clearRect(0,0,w,h);
+  // center
+  const cx = w * 0.45;
+  const cy = h * 0.55;
+  const hexR = Math.min(w,h) * 0.18;
+  // precompute apothem for triangle placement
+  const apothem = hexR * Math.cos(Math.PI/6); // distance from center to facet midpoint
+  // draw central hexagon
+  ctx.beginPath();
+  for (let i=0;i<6;i++){
+    const a = -PI/2 + i * TWO_PI/6;
+    const x = cx + cos(a) * hexR;
+    const y = cy + sin(a) * hexR;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  // center color shows toxicity
+  const toxColor = toxicity === 3 ? '#b30000' : (toxicity === 2 ? '#ffd11a' : '#8fd14f');
+  ctx.fillStyle = toxColor;
+  ctx.fill();
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.stroke();
+
+  // determine ligand arrangement from `ligandPositions` and draw triangles with those colors
+  const arrangement = (Array.isArray(ligandPositions) && ligandPositions.length === 6) ? ligandPositions.slice(0,6) : getLigandArrangement();
+  for (let i=0;i<6;i++){
+    const mid = -Math.PI/2 + (i + 0.5) * TWO_PI/6;
+    const triH = hexR * 0.95;
+    const triS = (2 * triH) / Math.sqrt(3);
+    const halfBase = triS / 2;
+    const tipDist = apothem - 2;
+    const baseCenterDist = tipDist + triH;
+    const tipX = cx + Math.cos(mid) * tipDist;
+    const tipY = cy + Math.sin(mid) * tipDist;
+    const baseCenterX = cx + Math.cos(mid) * baseCenterDist;
+    const baseCenterY = cy + Math.sin(mid) * baseCenterDist;
+    const px = Math.cos(mid + Math.PI/2);
+    const py = Math.sin(mid + Math.PI/2);
+    const baseAx = baseCenterX + px * halfBase;
+    const baseAy = baseCenterY + py * halfBase;
+    const baseBx = baseCenterX - px * halfBase;
+    const baseBy = baseCenterY - py * halfBase;
+
+    const colorIdx = arrangement[i];
+    ctx.fillStyle = (colorIdx === -1) ? '#e6e6e6' : colorForIndex(colorIdx);
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(baseAx, baseAy);
+    ctx.lineTo(baseBx, baseBy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+// If legacy `ligandCounts` used, map them to positions; otherwise `ligandPositions` holds explicit slots.
+function getLigandArrangement(){
+  const arr = [];
+  for (let color = 0; color < 6; color++){
+    let count = Math.max(0, Math.floor(ligandCounts[color] || 0));
+    for (let k = 0; k < count && arr.length < 6; k++) arr.push(color);
+  }
+  while (arr.length < 6) arr.push(-1);
+  return arr.slice(0,6);
+}
+
+function computeLigandCountsFromPositions(){
+  const counts = [0,0,0,0,0,0];
+  for (let i=0;i<6;i++){
+    const v = ligandPositions[i];
+    if (typeof v === 'number' && v >= 0 && v < 6) counts[v]++;
+  }
+  return counts;
+}
+
+function populateLigandPositionsFromCounts(counts){
+  const pos = [];
+  for (let color=0;color<6;color++){
+    let c = Math.max(0, Math.floor(counts[color]||0));
+    for (let k=0;k<c && pos.length<6;k++) pos.push(color);
+  }
+  while (pos.length < 6) pos.push(-1);
+  ligandPositions = pos.slice(0,6);
+  updateSelectorsFromPositions();
+  regenerateParticleSprite(particleSpriteSize);
+}
+
+function setupLigandSelectors(){
+  const names = ['Red','Blue','Green','Purple','Orange','Yellow'];
+  const selects = document.querySelectorAll('.ligandSelect');
+  selects.forEach(s=>{
+    // clear
+    s.innerHTML = '';
+    for (let i=0;i<6;i++){
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = names[i];
+      s.appendChild(opt);
+    }
+    // empty option
+    const emptyOpt = document.createElement('option'); emptyOpt.value = -1; emptyOpt.textContent = 'None';
+    s.appendChild(emptyOpt);
+    s.onchange = (e)=>{
+      const idx = parseInt(s.getAttribute('data-index'));
+      const val = parseInt(s.value);
+      ligandPositions[idx] = (isNaN(val) || val < 0) ? -1 : val;
+        drawNanoparticlePreview();
+        regenerateParticleSprite(particleSpriteSize);
+        updateScoreboard();
+    };
+  });
+  updateSelectorsFromPositions();
+}
+
+function updateSelectorsFromPositions(){
+  const selects = document.querySelectorAll('.ligandSelect');
+  selects.forEach(s=>{
+    const idx = parseInt(s.getAttribute('data-index'));
+    const v = ligandPositions[idx];
+    s.value = (typeof v === 'number' && v >=0) ? String(v) : String(-1);
+  });
+}
+
+function applyPuzzle(p){
+  // puzzle JSON: { id, tissues:[{name, receptors:[6]}], ligandCounts:[6], toxicity }
+  puzzle = p;
+  const cnt = Math.min(tissueAreas.length, (p.tissues||[]).length);
+  for (let i=0;i<cnt;i++){
+    const area = tissueAreas[i];
+    // In single-tissue mode, use the stored tissueIndex to map to the correct puzzle tissue
+    const puzzleIndex = (typeof area.tissueIndex === 'number') ? area.tissueIndex : i;
+    const puzzleTissue = p.tissues[puzzleIndex];
+
+    if (puzzleTissue) {
+      area.name = puzzleTissue.name || ('T'+(puzzleIndex+1));
+
+      // Check if receptors actually changed
+      const receptorsChanged = !area.receptors ||
+        area.receptors.some((v, idx) => v !== (puzzleTissue.receptors[idx] || 0));
+
+      area.receptors = puzzleTissue.receptors.slice(0,6);
+      area.bound = 0;
+      area.attempts = 0;
+
+      // Only clear receptor objects if the receptor configuration changed
+      if (receptorsChanged) {
+        for (let cell of area.cells) {
+          cell.receptorObjects = null;
+          cell.bound = 0;
+        }
+      }
+    }
+  }
+  ligandCounts = p.ligandCounts || ligandCounts;
+  if (p.ligandCounts) populateLigandPositionsFromCounts(p.ligandCounts);
+  toxicity = p.toxicity || toxicity;
+  updateScoreboard();
+  drawNanoparticlePreview();
+}
+
+function updateScoreboard(){
+  if (!puzzle) return;
+  const counts = computeLigandCountsFromPositions();
+  let scores = scoreAll(counts, puzzle.tissues, toxicity);
+  let html = '';
+
+  // In single-tissue mode, only show the one tissue
+  for (let i = 0; i < tissueAreas.length; i++) {
+    const area = tissueAreas[i];
+    const puzzleIndex = (typeof area.tissueIndex === 'number') ? area.tissueIndex : i;
+    const t = puzzle.tissues[puzzleIndex];
+
+    if (!t) continue;
+
+    // Calculate actual binding percentage for this tissue
+    let totalReceptors = 0;
+    let boundReceptors = 0;
+    if (area && area.cells) {
+      for (let cell of area.cells) {
+        if (cell.receptorObjects) {
+          totalReceptors += cell.receptorObjects.length;
+          boundReceptors += cell.receptorObjects.filter(r => r.bound).length;
+        }
+      }
+    }
+    const bindingPct = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100).toFixed(1) : 0;
+
+    html += `<div class="tissue"><strong>${t.name}</strong><br>Theory: ${scores[t.name].toFixed(2)}<br>Actual: ${bindingPct}% (${area ? area.bound||0 : 0} bound)</div>`;
+  }
+  scoreboardDiv.innerHTML = html;
+}
+
+function loadPuzzle(){
+  fetch('puzzle_example.json').then(r=>r.json()).then(j=> { applyPuzzle(j); }).then(()=> updateScoreboard());
+}
+
+function resetSim(){
+  // Always clear particles and exit test mode on reset
+  particles = [];
+  testMode = false;
+  testParticlesReleased = 0;
+
+  for (let a of tissueAreas) {
+    a.bound = 0;
+    a.attempts = 0;
+    for (let cell of a.cells) {
+      cell.bound = 0;
+      // Reset all receptor bound states
+      if (cell.receptorObjects) {
+        for (let receptor of cell.receptorObjects) {
+          receptor.bound = false;
+        }
+      }
+    }
+  }
+
+  updateScoreboard();
+}
+
+// periodically refresh scoreboard
+setInterval(()=> updateScoreboard(), 800);

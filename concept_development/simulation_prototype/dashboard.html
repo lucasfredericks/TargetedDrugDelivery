@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TDD Dashboard</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:12px}
+    #controls{display:flex;gap:12px;align-items:flex-start}
+    #npPreview{border:1px solid #ddd;border-radius:4px;background:#fff}
+    .ligandRow{display:flex;gap:6px}
+    .tissues{margin-top:12px}
+  </style>
+</head>
+<body>
+  <h3>Targeted Drug Delivery — Dashboard</h3>
+  <div id="controls">
+    <div>
+      <div style="margin-bottom:8px">
+        <button id="loadPuzzle">Load example puzzle</button>
+        <label>Fidelity: <input id="fidelity" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <button id="resetSim">Reset</button>
+      </div>
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong>Ligands</strong>
+          <button id="randomizeLigands" style="font-size:11px;padding:2px 8px">Randomize</button>
+        </div>
+        <div class="ligandRow" id="ligandRow"></div>
+      </div>
+      <div>
+        <button id="testBtn">Test (1000 particles)</button>
+      </div>
+    </div>
+    <canvas id="npPreview" width="220" height="160"></canvas>
+  </div>
+
+  <div class="tissues">
+    <strong>Puzzle tissues (example):</strong>
+    <div id="tissueControls" style="margin-top:8px"></div>
+    <pre id="puzzleView" style="background:#f8f8f8;padding:8px;border-radius:4px;max-width:800px;margin-top:8px"></pre>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,379 @@
+1. Addressing Key Questions & Uncertainties
+1.1 Fidelity: What it is and how to measure it
+
+Clarifying “fidelity”
+In this exhibit, fidelity does not need to mean biological accuracy. Instead, it should mean:
+
+The simulation outcome statistically agrees with the mathematical scoring model, within a controlled and explainable margin of randomness.
+
+Operational definition
+Let:
+
+S_math(tissue) = toxicity score from the prototype formula
+
+S_sim(tissue) = normalized simulation outcome (e.g., % bound events, % dead cells)
+
+Define fidelity as:
+
+fidelity = 1 − average(|S_sim − S_math| / S_math)
+
+
+(clamped to [0,1])
+
+You do not need to show this number to users; it’s an internal tuning metric.
+
+Recommendation
+
+Target fidelity range: 0.85–0.95
+
+Below 0.85 → confusing outcomes
+
+Above 0.95 → looks “rigged” or deterministic
+
+1.2 Random variation: how much is “too much”?
+
+Your instinct is correct: randomness improves realism but harms comprehension if uncontrolled 
+
+project_description
+
+.
+
+Best practice
+
+All randomness should be:
+
+Seeded per puzzle
+
+Bounded by receptor–ligand affinity
+
+Rule of thumb
+Let P_bind be the ideal probability from math scoring.
+
+P_actual = P_bind ± rand(−ε, +ε)
+
+
+Where:
+
+Easy puzzles: ε = 5%
+
+Medium: ε = 10%
+
+Hard: ε = 15%
+
+This allows:
+
+Same puzzle → similar outcomes
+
+Different nanoparticle → visibly different behavior
+
+1.3 Do you need per-ligand physics?
+
+“Modeling attraction of each receptor/ligand seems like a lot of overhead.”
+You’re right. Don’t do it.
+
+Recommended abstraction
+
+Visual layer:
+
+Individual colored ligands appear to bind to matching receptors
+
+Logic layer:
+
+Binding is computed using aggregate affinity scores, not pairwise forces
+
+How to “fudge” realism convincingly
+
+Compute a single affinityScore(tissue) per nanoparticle
+
+Use that score to:
+
+Modulate binding probability
+
+Select which color binding animation plays
+
+This preserves educational clarity (“red binds red”) without the cost of N² physics.
+
+1.4 LiquidFun vs Box2D vs custom rendering
+
+LiquidFun
+Pros:
+
+Excellent particle-fluid visuals
+
+GPU-accelerated
+
+Mature
+
+Cons:
+
+Hard to customize per-particle forces
+
+JS support is limited and aging
+
+Recommendation
+Use Box2D-style kinematics + custom particle motion, not full fluid simulation.
+
+Why
+
+You do not need true Navier–Stokes behavior
+
+Visitors will read motion symbolically, not analytically
+
+You gain full control over performance and determinism
+
+Implementation approach
+
+Nanoparticles = lightweight agents with:
+
+Brownian motion
+
+Directional bias toward cells proportional to affinity
+
+Fluid look = noise-based velocity fields (Perlin/simplex)
+
+1.5 Cell membranes & receptors: how real is “real enough”?
+
+You asked whether lipid bilayers can be simulated realistically 
+
+project_description
+
+.
+
+Answer: Don’t simulate bilayers physically.
+
+Museum-appropriate abstraction
+
+Cell = soft circle
+
+Membrane = animated ring
+
+Receptors = colored “ports” on circumference
+
+Binding
+
+Occurs when nanoparticle enters a receptor’s influence radius
+
+Color match increases probability
+
+Upon binding:
+
+Nanoparticle sticks briefly
+
+Ligand color flashes
+
+Drug payload counter increments
+
+This is intuitive for ages 10–14 and visually legible at a distance.
+
+1.6 Cell death vs binding as the scoring event
+
+Recommendation: Two-tier system
+
+Primary scoring (logic): binding events
+
+Secondary visualization: cell death
+
+Why
+
+Binding is fast, frequent, and numerically stable
+
+Cell death is dramatic but slow and binary
+
+Translation
+
+After N bindings → cell enters “dying” state
+
+After M dying cells → tissue “fails”
+
+This allows:
+
+Clear pass/fail
+
+Visual drama
+
+Consistent fidelity tuning
+
+1.7 Where does scoring live in the exhibit?
+
+Your intuition is right: the testing station needs a clear outcome 
+
+project_description
+
+.
+
+Recommended layout
+
+Each tissue screen shows:
+
+Live simulation
+
+Simple bar or icon-based damage meter
+
+Central or fifth screen (optional):
+
+Summary:
+
+Tumor: ✔ / ✖
+
+Heart/Liver/etc.: ✔ / ✖
+
+Use icons, not numbers:
+
+Green cell = healthy
+
+Yellow = stressed
+
+Red = dead
+
+1.8 Puzzle data format
+
+Use JSON. No exceptions.
+
+Example:
+
+{
+  "puzzleId": "tumor_03",
+  "tissues": {
+    "tumor": [0.8, 0.1, 0.6, 0.2, 0.3, 0.1],
+    "heart": [0.7, 0.2, 0.1, 0.1, 0.2, 0.3],
+    "liver": [0.1, 0.3, 0.8, 0.2, 0.1, 0.1]
+  },
+  "difficulty": "medium"
+}
+
+
+JS handles this trivially, and it future-proofs networking and tooling.
+
+2. Simulation Software Work Plan
+
+This plan assumes JavaScript + p5.js, modular, and scalable across multiple machines.
+
+Phase 1: Core Logic (No Graphics)
+
+Goal: Reproduce prototype math in JS
+
+Deliverables:
+
+Ligand count → affinity calculation
+
+Drug toxicity multiplier
+
+Tissue toxicity scoring
+
+Pass/fail logic
+
+Output:
+
+Console logs or simple UI
+
+Unit tests comparing Processing prototype results
+
+Phase 2: Agent-Based Simulation (Single Tissue)
+
+Goal: Visualize math-driven outcomes
+
+Deliverables:
+
+Nanoparticle agent class
+
+Cell class with receptors
+
+Affinity-driven attraction
+
+Binding events
+
+Internal fidelity metric
+
+No fluid yet—just motion.
+
+Phase 3: Visual Language & Feedback
+
+Goal: Museum-ready clarity
+
+Deliverables:
+
+Color-coded ligands/receptors
+
+Binding animations
+
+Drug accumulation indicators
+
+Cell state transitions (healthy → dying → dead)
+
+Focus on legibility at 6–10 feet.
+
+Phase 4: Controlled Randomness & Fidelity Tuning
+
+Goal: Match “feel” of prototype
+
+Deliverables:
+
+Seeded RNG per puzzle
+
+Difficulty-based variance scaling
+
+Fidelity monitoring tools
+
+Debug visualization overlays (dev-only)
+
+Phase 5: Multi-Tissue Architecture
+
+Goal: Scale to 4 tissues / screens
+
+Deliverables:
+
+Shared state model
+
+Network message schema (WebSocket / OSC / simple HTTP)
+
+Tissue-specific simulation instances
+
+Central controller (or leader node)
+
+Phase 6: Performance & Hardware Validation
+
+Goal: Ensure smooth museum operation
+
+Deliverables:
+
+Particle count stress tests
+
+GPU vs CPU profiling
+
+Fallback quality modes
+
+Watchdog & auto-reset logic
+
+Phase 7: Puzzle Tooling (Editor)
+
+Goal: Enable exhibit designers
+
+Deliverables:
+
+Puzzle constructor UI
+
+Math-only solver preview
+
+JSON export
+
+Difficulty estimation
+
+3. Final Recommendations (High-Level)
+
+Prioritize interpretability over realism
+
+Use aggregate math + symbolic animation
+
+Treat fidelity as an engineering constraint, not a user-facing feature
+
+Build simulation last, not first—but architect for it early
+
+If you want, next steps could include:
+
+A class diagram for the simulation architecture
+
+Pseudocode for binding probability
+
+A concrete networking model for multi-PC deployment
+
+A visual style guide for receptors, ligands, and cells

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Targeted Drug Delivery — Simulation Prototype</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 12px; }
+    #controls { margin-bottom: 8px; }
+    canvas { border: 1px solid #ccc; display:block; }
+    .tissue { margin-right:12px; display:inline-block }
+  </style>
+</head>
+<body>
+  <h3>Targeted Drug Delivery — Simulation</h3>
+  <div style="font-size:13px;color:#666;margin-bottom:8px">Controls moved to dashboard — open <em>dashboard.html</em> to edit ligands and parameters.</div>
+
+  <div id="scoreboard"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+  <!-- Modular simulation architecture -->
+  <script src="src/constants.js"></script>
+  <script src="src/utils.js"></script>
+  <script src="src/scoring.js"></script>
+  <script src="src/NanoparticleSprite.js"></script>
+  <script src="src/Receptor.js"></script>
+  <script src="src/Cell.js"></script>
+  <script src="src/Particle.js"></script>
+  <script src="src/BindingLogic.js"></script>
+  <script src="src/Simulation.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>
