@@ -88,7 +88,7 @@ class Particle {
     );
   }
 
-  // Bind particle to a receptor
+  // Bind particle to a single receptor (legacy method)
   bindTo(receptor, spriteSize) {
     const offsetDist = spriteSize * 0.5 + 2;
     this.x = receptor.tipX + receptor.nx * offsetDist;
@@ -99,6 +99,67 @@ class Particle {
     this.bound = true;
     this.angle = Math.atan2(receptor.ny, receptor.nx);
     receptor.bound = true;
+  }
+
+  // Bind particle to multiple receptors with centroid positioning
+  // matchedReceptors: array of Receptor objects that matched
+  // matchedLigands: array of ligand objects with {index, x, y, angle, color}
+  bindToMultiple(matchedReceptors, matchedLigands, spriteSize) {
+    if (matchedReceptors.length === 0) return;
+
+    // Calculate centroid of matched receptor tips
+    let centroidX = 0;
+    let centroidY = 0;
+    let avgNx = 0;
+    let avgNy = 0;
+
+    for (let receptor of matchedReceptors) {
+      centroidX += receptor.tipX;
+      centroidY += receptor.tipY;
+      avgNx += receptor.nx;
+      avgNy += receptor.ny;
+    }
+
+    centroidX /= matchedReceptors.length;
+    centroidY /= matchedReceptors.length;
+    avgNx /= matchedReceptors.length;
+    avgNy /= matchedReceptors.length;
+
+    // Normalize average normal
+    const normLen = Math.sqrt(avgNx * avgNx + avgNy * avgNy) || 1;
+    avgNx /= normLen;
+    avgNy /= normLen;
+
+    // Position particle so ligands touch receptor tips
+    // Offset from centroid along the average outward normal
+    const offsetDist = spriteSize * 0.3;
+    this.x = centroidX + avgNx * offsetDist;
+    this.y = centroidY + avgNy * offsetDist;
+
+    // Orient particle so it faces the cell (opposite to outward normal)
+    this.angle = Math.atan2(-avgNy, -avgNx) + Math.PI / 2;
+
+    // Stop motion
+    this.vx = 0;
+    this.vy = 0;
+    this.angVel = 0;
+    this.bound = true;
+
+    // Store binding info for potential visual feedback
+    this.boundReceptors = matchedReceptors;
+    this.boundLigands = matchedLigands;
+
+    // Mark all matched receptors as bound and latched
+    for (let i = 0; i < matchedReceptors.length; i++) {
+      const receptor = matchedReceptors[i];
+      const ligand = matchedLigands[i];
+      receptor.bound = true;
+      receptor.latched = true;
+      receptor.latchedLigandColor = ligand.color;
+      // Store the ligand's world position for visual connection
+      receptor.latchedLigandX = ligand.x;
+      receptor.latchedLigandY = ligand.y;
+    }
   }
 
   // Deflect particle around a cell

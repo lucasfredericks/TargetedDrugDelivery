@@ -1,4 +1,130 @@
-// BindingLogic.js - Binding probability calculations
+// BindingLogic.js - Binding logic with physics-based adjacency matching
+
+// =============================================================================
+// ADJACENCY-BASED BINDING SYSTEM
+// Particles bind when enough ligands on the leading edge match nearby receptors
+// =============================================================================
+
+// Compute world-space positions of all 6 ligand tips on a particle
+function getLigandWorldPositions(particle, spriteSize, ligandPositions) {
+  // Distance from particle center to ligand tip (matches NanoparticleSprite geometry)
+  const hexR = spriteSize * 0.35;
+  const apothem = hexR * Math.cos(Math.PI / 6);
+  const triH = hexR * 0.7;
+  const ligandDist = apothem - 1 + triH;  // tip distance from center
+
+  const positions = [];
+
+  for (let i = 0; i < 6; i++) {
+    // Local angle for ligand i (relative to particle, matching sprite generation)
+    const localAngle = -Math.PI / 2 + (i + 0.5) * Math.PI / 3;
+    // World angle = particle rotation + local angle
+    const worldAngle = particle.angle + localAngle;
+
+    positions.push({
+      index: i,
+      x: particle.x + Math.cos(worldAngle) * ligandDist,
+      y: particle.y + Math.sin(worldAngle) * ligandDist,
+      angle: worldAngle,
+      color: ligandPositions[i]  // -1 if empty slot
+    });
+  }
+  return positions;
+}
+
+// Find ligands on the leading edge (facing toward the cell)
+function getLeadingEdgeLigands(particle, cell, ligandWorldPositions) {
+  // Direction from particle to cell center
+  const dx = cell.cx - particle.x;
+  const dy = cell.cy - particle.y;
+  const collisionAngle = Math.atan2(dy, dx);
+
+  const leading = [];
+  for (let lig of ligandWorldPositions) {
+    // Angle from particle center toward this ligand
+    const ligAngle = Math.atan2(lig.y - particle.y, lig.x - particle.x);
+
+    // Angular difference (normalized to -π to π)
+    let angleDiff = ligAngle - collisionAngle;
+    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+    // Within ±60° cone = leading edge (captures 2-3 ligands)
+    if (Math.abs(angleDiff) <= Math.PI / 3) {
+      leading.push(lig);
+    }
+  }
+  return leading;
+}
+
+// Count adjacent ligand-receptor matches and return matched receptors
+function countAdjacentMatches(leadingLigands, cell, matchRadius) {
+  let matches = 0;
+  const matchedReceptors = [];
+  const matchedLigands = [];
+  const usedReceptors = new Set();
+
+  for (let lig of leadingLigands) {
+    if (lig.color === -1) continue;  // Empty slot, skip
+
+    // Find nearest unbound receptor of matching color within range
+    let bestReceptor = null;
+    let bestDist = Infinity;
+
+    for (let receptor of cell.receptors) {
+      if (receptor.bound) continue;
+      if (usedReceptors.has(receptor)) continue;
+      if (receptor.color !== lig.color) continue;
+
+      const dx = lig.x - receptor.tipX;
+      const dy = lig.y - receptor.tipY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < matchRadius && dist < bestDist) {
+        bestDist = dist;
+        bestReceptor = receptor;
+      }
+    }
+
+    if (bestReceptor) {
+      matches++;
+      matchedReceptors.push(bestReceptor);
+      matchedLigands.push(lig);
+      usedReceptors.add(bestReceptor);  // Prevent double-counting
+    }
+  }
+
+  return { matches, matchedReceptors, matchedLigands };
+}
+
+// Attempt adjacency-based binding. Returns true if particle binds.
+function attemptAdjacencyBinding(particle, cell, ligandPositions, spriteSize, threshold = 2) {
+  const matchRadius = spriteSize * 0.6;
+
+  // Get world positions of all ligands
+  const ligandWorld = getLigandWorldPositions(particle, spriteSize, ligandPositions);
+
+  // Find ligands on the leading edge
+  const leading = getLeadingEdgeLigands(particle, cell, ligandWorld);
+
+  // Count matches with nearby receptors
+  const { matches, matchedReceptors, matchedLigands } = countAdjacentMatches(leading, cell, matchRadius);
+
+  if (matches >= threshold) {
+    return {
+      success: true,
+      matchedReceptors,
+      matchedLigands,
+      matchCount: matches
+    };
+  }
+
+  return { success: false, matchCount: matches };
+}
+
+// =============================================================================
+// LEGACY PROBABILISTIC SYSTEM (kept for reference/fallback)
+// =============================================================================
 
 // Calculate binding probability for a particle based on ligand-receptor match
 function bindingProbabilityForParticle(ligandCounts, receptors, toxicityMult, fidelityParam) {
@@ -110,6 +236,10 @@ function findNearestCollidingCell(particle, cells, spriteRadius) {
 }
 
 // Export for browser global
+window.getLigandWorldPositions = getLigandWorldPositions;
+window.getLeadingEdgeLigands = getLeadingEdgeLigands;
+window.countAdjacentMatches = countAdjacentMatches;
+window.attemptAdjacencyBinding = attemptAdjacencyBinding;
 window.bindingProbabilityForParticle = bindingProbabilityForParticle;
 window.hasMatchingReceptors = hasMatchingReceptors;
 window.findNearestMatchingReceptor = findNearestMatchingReceptor;

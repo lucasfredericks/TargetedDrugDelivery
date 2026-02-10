@@ -176,6 +176,10 @@ class Cell {
     this.bound = 0;
     for (let receptor of this.receptors) {
       receptor.bound = false;
+      receptor.latched = false;
+      receptor.latchedLigandColor = -1;
+      receptor.latchedLigandX = 0;
+      receptor.latchedLigandY = 0;
     }
   }
 

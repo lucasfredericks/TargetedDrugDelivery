@@ -9,6 +9,22 @@
     #npPreview{border:1px solid #ddd;border-radius:4px;background:#fff}
     .ligandRow{display:flex;gap:6px}
     .tissues{margin-top:12px}
+
+    /* Bar graph styles */
+    #resultsGraph{margin-top:16px;padding:12px;background:#f8f8f8;border-radius:4px;max-width:600px}
+    #resultsGraph h4{margin:0 0 12px 0}
+    .tissue-bar-row{display:flex;align-items:center;margin-bottom:8px}
+    .tissue-bar-label{width:60px;font-size:12px;font-weight:bold}
+    .tissue-bar-container{flex:1;display:flex;flex-direction:column;gap:2px}
+    .bar-wrapper{display:flex;align-items:center;gap:6px}
+    .bar-bg{flex:1;height:16px;background:#e0e0e0;border-radius:3px;overflow:hidden;position:relative}
+    .bar-fill{height:100%;border-radius:3px;transition:width 0.3s ease}
+    .bar-theory{background:linear-gradient(90deg,#6eb5ff,#2196f3)}
+    .bar-actual{background:linear-gradient(90deg,#81c784,#4caf50)}
+    .bar-value{font-size:11px;width:45px;text-align:right}
+    .bar-legend{display:flex;gap:16px;margin-bottom:8px;font-size:11px}
+    .legend-item{display:flex;align-items:center;gap:4px}
+    .legend-color{width:12px;height:12px;border-radius:2px}
   </style>
 </head>
 <body>
@@ -17,7 +33,7 @@
     <div>
       <div style="margin-bottom:8px">
         <button id="loadPuzzle">Load example puzzle</button>
-        <label>Fidelity: <input id="fidelity" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <label>Particles per tissue: <input id="particleCount" type="range" min="100" max="3000" step="100" value="1000"><span id="particleCountLabel">1000</span></label>
         <button id="resetSim">Reset</button>
       </div>
       <div style="margin-bottom:8px">
@@ -28,10 +44,23 @@
         <div class="ligandRow" id="ligandRow"></div>
       </div>
       <div>
-        <button id="testBtn">Test (1000 particles)</button>
+        <button id="testBtn">Test</button>
       </div>
     </div>
     <canvas id="npPreview" width="220" height="160"></canvas>
+  </div>
+
+  <!-- Results bar graph -->
+  <div id="resultsGraph">
+    <h4>Binding Results</h4>
+    <div class="bar-legend">
+      <div class="legend-item"><div class="legend-color bar-theory"></div>Theory</div>
+      <div class="legend-item"><div class="legend-color bar-actual"></div>Actual</div>
+    </div>
+    <div id="barGraphContent">
+      <!-- Bars will be populated by JavaScript -->
+      <div style="color:#888;font-size:12px">Run a test to see results</div>
+    </div>
   </div>
 
   <div class="tissues">
@@ -40,6 +69,9 @@
     <pre id="puzzleView" style="background:#f8f8f8;padding:8px;border-radius:4px;max-width:800px;margin-top:8px"></pre>
   </div>
 
+  <script src="src/constants.js"></script>
+  <script src="src/utils.js"></script>
+  <script src="src/scoring.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

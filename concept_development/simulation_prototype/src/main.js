@@ -156,7 +156,7 @@ function drawTissueLabel(sim, area) {
 
   textSize(12);
   text(
-    `Theory: ${stats.theoreticalScore.toFixed(2)} | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)`,
+    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)`,
     area.x + 8,
     area.y - 6
   );
@@ -226,18 +226,21 @@ function drawSingleTissueInfo() {
 
   textSize(14);
   text(
-    `Theory: ${stats.theoreticalScore.toFixed(2)} | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} particles bound)`,
+    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} particles bound)`,
     width / 2,
     boxY + 32
   );
 }
 
+// Global channel reference for broadcasting stats
+let broadcastChannel = null;
+
 function setupBroadcastChannel() {
   try {
-    const channel = new BroadcastChannel('tdd-channel');
+    broadcastChannel = new BroadcastChannel('tdd-channel');
     console.log('Simulation: BroadcastChannel created');
 
-    channel.onmessage = (ev) => {
+    broadcastChannel.onmessage = (ev) => {
       const msg = ev.data || {};
       console.log('Simulation received message:', msg.type, msg.command || '');
 
@@ -248,28 +251,26 @@ function setupBroadcastChannel() {
           sim.startTest(msg.totalParticles || 1000, 600);
         }
         updateScoreboard();
+        broadcastStats();
       } else if (msg.type === 'params') {
-        // Update global parameters
+        // Apply puzzle update first if provided (updates tissue receptors)
+        // but skip ligandCounts from puzzle - we'll use msg.ligandPositions instead
+        if (msg.puzzle) {
+          applyPuzzleWithoutLigands(msg.puzzle);
+        }
+
+        // Update global parameters from dashboard (takes precedence over puzzle)
         if (Array.isArray(msg.ligandPositions)) {
           globalParams.ligandPositions = msg.ligandPositions.slice(0, 6);
         }
         if (typeof msg.toxicity === 'number') {
           globalParams.toxicity = msg.toxicity;
         }
-        if (typeof msg.fidelity === 'number') {
-          globalParams.fidelity = msg.fidelity;
-        }
-
-        // Apply puzzle update if provided
-        if (msg.puzzle) {
-          applyPuzzle(msg.puzzle);
-        }
 
         // Propagate to all simulations
         for (let sim of simulations) {
           sim.setLigandPositions(globalParams.ligandPositions);
           sim.setToxicity(globalParams.toxicity);
-          sim.setFidelity(globalParams.fidelity);
         }
 
         // Handle commands
@@ -280,11 +281,32 @@ function setupBroadcastChannel() {
         }
 
         updateScoreboard();
+        broadcastStats();
       }
     };
   } catch (e) {
     console.warn('BroadcastChannel not available');
   }
+}
+
+// Broadcast stats to dashboard for bar graph
+function broadcastStats() {
+  if (!broadcastChannel) return;
+
+  const stats = simulations.map(sim => {
+    const s = sim.getStats();
+    return {
+      name: sim.tissue.name,
+      theoreticalScore: s.theoreticalScore,
+      bindingPercentage: s.bindingPercentage,
+      bound: s.bound
+    };
+  });
+
+  broadcastChannel.postMessage({
+    type: 'stats',
+    stats: stats
+  });
 }
 
 function applyPuzzle(p) {
@@ -316,6 +338,26 @@ function applyPuzzle(p) {
   }
 }
 
+// Apply puzzle tissue/receptor config without overwriting ligand positions
+// Used when dashboard sends params - dashboard ligandPositions take precedence
+function applyPuzzleWithoutLigands(p) {
+  puzzle = p;
+
+  // Update each simulation with its tissue config
+  for (let i = 0; i < simulations.length; i++) {
+    const sim = simulations[i];
+    const tissueIndex = sim.tissueIndex;
+    const tissue = p.tissues[tissueIndex];
+
+    if (tissue) {
+      sim.setTissue(tissue);
+    }
+  }
+
+  // Note: We intentionally skip updating ligandPositions here
+  // The dashboard's ligandPositions will be applied separately
+}
+
 function updateScoreboard() {
   if (!scoreboardDiv || !puzzle) return;
 
@@ -326,14 +368,17 @@ function updateScoreboard() {
     const stats = sim.getStats();
     const tissue = sim.tissue;
 
-    html += `<div class="tissue"><strong>${tissue.name}</strong><br>Theory: ${stats.theoreticalScore.toFixed(2)}<br>Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)</div>`;
+    html += `<div class="tissue"><strong>${tissue.name}</strong><br>Theory: ${stats.theoreticalScore.toFixed(1)}%<br>Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)</div>`;
   }
 
   scoreboardDiv.innerHTML = html;
 }
 
-// Periodically refresh scoreboard
-setInterval(() => updateScoreboard(), 800);
+// Periodically refresh scoreboard and broadcast stats to dashboard
+setInterval(() => {
+  updateScoreboard();
+  broadcastStats();
+}, 800);
 
 // Expose global functions for compatibility with dashboard.html if opened together
 window.loadPuzzle = function() {

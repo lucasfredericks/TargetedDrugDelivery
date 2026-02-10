@@ -190,10 +190,13 @@ class Simulation {
 
   /**
    * Update all particles (physics, collision, binding)
+   * Uses adjacency-based binding: particles bind when enough leading-edge
+   * ligands match nearby receptors of the same color.
    */
   updateParticles(frameCount) {
     const spriteRadius = this.physicsParams.particleSpriteSize * 0.5;
-    const ligandCounts = computeLigandCountsFromPositions(this.ligandPositions);
+    const spriteSize = this.physicsParams.particleSpriteSize;
+    const bindingThreshold = 2;  // Require 2 adjacent matches to bind
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -213,28 +216,26 @@ class Simulation {
       const nearestCell = findNearestCollidingCell(p, this.cells, spriteRadius);
 
       if (nearestCell) {
-        // Check if particle is near a matching receptor
-        const hasMatch = hasMatchingReceptors(p, nearestCell, ligandCounts, spriteRadius);
-
-        let prob = 0;
-        if (hasMatch) {
-          prob = bindingProbabilityForParticle(
-            ligandCounts,
-            this.tissue.receptors,
-            this.toxicity,
-            this.fidelity
-          );
-        }
         this.attempts++;
 
-        if (prob > 0 && Math.random() < prob) {
-          // Bind to nearest matching receptor
-          const receptor = findNearestMatchingReceptor(p, nearestCell, ligandCounts);
-          if (receptor) {
-            p.bindTo(receptor, this.physicsParams.particleSpriteSize);
-            this.bound++;
-            nearestCell.bound++;
-          }
+        // Attempt adjacency-based binding
+        const result = attemptAdjacencyBinding(
+          p,
+          nearestCell,
+          this.ligandPositions,
+          spriteSize,
+          bindingThreshold
+        );
+
+        if (result.success) {
+          // Bind particle to matched receptors
+          p.bindToMultiple(
+            result.matchedReceptors,
+            result.matchedLigands,
+            spriteSize
+          );
+          this.bound++;
+          nearestCell.bound += result.matchCount;
         } else {
           // Deflect around cell
           p.deflectAroundCell(nearestCell, spriteRadius, this.physicsParams.flowSpeed);
@@ -417,7 +418,7 @@ class Simulation {
 
     const bindingPercentage = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100) : 0;
     const ligandCounts = computeLigandCountsFromPositions(this.ligandPositions);
-    const theoreticalScore = scoreTissue(ligandCounts, this.tissue.receptors, this.toxicity);
+    const theoreticalScore = scoreTissue(ligandCounts, this.tissue.receptors);
 
     return {
       bound: this.bound,
