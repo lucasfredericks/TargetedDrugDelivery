@@ -123,6 +123,177 @@ function attemptAdjacencyBinding(particle, cell, ligandPositions, spriteSize, th
 }
 
 // =============================================================================
+// NODE-BASED BINDING SYSTEM
+// Binding occurs between particle vertex nodes and cell receptor nodes
+// Each node has an ordered pair identity (colorA, colorB)
+// =============================================================================
+
+/**
+ * Compute the 6 vertex nodes on a particle.
+ * Each vertex is between two adjacent ligands and has a pair identity.
+ * A node is only active if BOTH adjacent ligands are present (not -1).
+ *
+ * @param {Object} particle - Particle with x, y, angle properties
+ * @param {number} spriteSize - Size of particle sprite
+ * @param {number[]} ligandPositions - Array of 6 ligand colors (-1 to 5)
+ * @returns {Array} Array of node objects {x, y, angle, pairId, color1, color2, active}
+ */
+function getParticleNodes(particle, spriteSize, ligandPositions) {
+  const hexR = spriteSize * 0.35;
+  // Vertex distance from center (at the corners of the hexagon)
+  const vertexDist = hexR;
+
+  const nodes = [];
+
+  for (let i = 0; i < 6; i++) {
+    // Vertex i is at angle: -π/2 + i * π/3 (vertices at 0°, 60°, 120°, etc from top)
+    const localAngle = -Math.PI / 2 + i * Math.PI / 3;
+    const worldAngle = particle.angle + localAngle;
+
+    const nodeX = particle.x + Math.cos(worldAngle) * vertexDist;
+    const nodeY = particle.y + Math.sin(worldAngle) * vertexDist;
+
+    // Node i is between ligand (i+5)%6 (counterclockwise) and ligand i (clockwise)
+    // Going around the hexagon clockwise, the pair is (left ligand, right ligand)
+    const leftLigandIdx = (i + 5) % 6;
+    const rightLigandIdx = i;
+
+    const color1 = ligandPositions[leftLigandIdx];
+    const color2 = ligandPositions[rightLigandIdx];
+
+    // Node is only active if both ligands are present
+    const active = (typeof color1 === 'number' && color1 >= 0 && color1 < 6) &&
+                   (typeof color2 === 'number' && color2 >= 0 && color2 < 6);
+
+    const pairId = active ? `${color1}-${color2}` : null;
+
+    nodes.push({
+      index: i,
+      x: nodeX,
+      y: nodeY,
+      angle: worldAngle,
+      color1: color1,
+      color2: color2,
+      pairId: pairId,
+      active: active
+    });
+  }
+
+  return nodes;
+}
+
+/**
+ * Find particle nodes on the leading edge (facing toward the cell).
+ *
+ * @param {Object} particle - Particle with x, y properties
+ * @param {Object} cell - Cell with cx, cy properties
+ * @param {Array} particleNodes - Array from getParticleNodes()
+ * @returns {Array} Subset of nodes that are on the leading edge
+ */
+function getLeadingEdgeNodes(particle, cell, particleNodes) {
+  // Direction from particle to cell center
+  const dx = cell.cx - particle.x;
+  const dy = cell.cy - particle.y;
+  const collisionAngle = Math.atan2(dy, dx);
+
+  const leading = [];
+
+  for (let node of particleNodes) {
+    if (!node.active) continue;
+
+    // Angle from particle center toward this node
+    const nodeAngle = Math.atan2(node.y - particle.y, node.x - particle.x);
+
+    // Angular difference (normalized to -π to π)
+    let angleDiff = nodeAngle - collisionAngle;
+    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+    // Within ±60° cone = leading edge (captures 2-3 nodes typically)
+    if (Math.abs(angleDiff) <= Math.PI / 3) {
+      leading.push(node);
+    }
+  }
+
+  return leading;
+}
+
+/**
+ * Attempt node-based binding between particle and cell.
+ * Binding succeeds if at least one leading-edge particle node matches
+ * a nearby receptor node with the same ordered pair identity.
+ *
+ * @param {Object} particle - Particle with x, y, angle properties
+ * @param {Object} cell - Cell with receptorNodes array
+ * @param {number[]} ligandPositions - Array of 6 ligand colors
+ * @param {number} spriteSize - Size of particle sprite
+ * @param {number} threshold - Minimum node matches required (default 1)
+ * @returns {Object} {success, matchedNodes, matchCount}
+ */
+function attemptNodeBinding(particle, cell, ligandPositions, spriteSize, threshold = 1) {
+  const matchRadius = spriteSize * 0.6;
+
+  // Get particle vertex nodes
+  const particleNodes = getParticleNodes(particle, spriteSize, ligandPositions);
+
+  // Find nodes on the leading edge
+  const leadingNodes = getLeadingEdgeNodes(particle, cell, particleNodes);
+
+  if (leadingNodes.length === 0) {
+    return { success: false, matchCount: 0 };
+  }
+
+  // Try to match leading particle nodes with cell receptor nodes
+  let matches = 0;
+  const matchedParticleNodes = [];
+  const matchedCellNodes = [];
+  const usedCellNodes = new Set();
+
+  for (let pNode of leadingNodes) {
+    // Find nearest unbound cell node with matching pair identity
+    let bestCellNode = null;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < cell.receptorNodes.length; i++) {
+      const cNode = cell.receptorNodes[i];
+
+      if (cNode.bound) continue;
+      if (usedCellNodes.has(i)) continue;
+
+      // Check if pair identity matches exactly
+      if (cNode.pairId !== pNode.pairId) continue;
+
+      const dx = pNode.x - cNode.x;
+      const dy = pNode.y - cNode.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < matchRadius && dist < bestDist) {
+        bestDist = dist;
+        bestCellNode = { node: cNode, index: i };
+      }
+    }
+
+    if (bestCellNode) {
+      matches++;
+      matchedParticleNodes.push(pNode);
+      matchedCellNodes.push(bestCellNode.node);
+      usedCellNodes.add(bestCellNode.index);
+    }
+  }
+
+  if (matches >= threshold) {
+    return {
+      success: true,
+      matchedParticleNodes,
+      matchedCellNodes,
+      matchCount: matches
+    };
+  }
+
+  return { success: false, matchCount: matches };
+}
+
+// =============================================================================
 // LEGACY PROBABILISTIC SYSTEM (kept for reference/fallback)
 // =============================================================================
 
@@ -240,6 +411,9 @@ window.getLigandWorldPositions = getLigandWorldPositions;
 window.getLeadingEdgeLigands = getLeadingEdgeLigands;
 window.countAdjacentMatches = countAdjacentMatches;
 window.attemptAdjacencyBinding = attemptAdjacencyBinding;
+window.getParticleNodes = getParticleNodes;
+window.getLeadingEdgeNodes = getLeadingEdgeNodes;
+window.attemptNodeBinding = attemptNodeBinding;
 window.bindingProbabilityForParticle = bindingProbabilityForParticle;
 window.hasMatchingReceptors = hasMatchingReceptors;
 window.findNearestMatchingReceptor = findNearestMatchingReceptor;

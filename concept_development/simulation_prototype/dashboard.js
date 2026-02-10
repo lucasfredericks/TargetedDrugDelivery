@@ -90,29 +90,19 @@
     const toxColor = toxicity===3? '#b30000' : (toxicity===2? '#ffd11a' : '#8fd14f'); ctx.fillStyle = toxColor; ctx.fill(); ctx.strokeStyle='#222'; ctx.stroke();
   }
 
-  // Calculate ligand counts from slots
-  function getLigandCounts() {
-    const counts = [0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < 6; i++) {
-      const v = ligandSlots[i];
-      if (typeof v === 'number' && v >= 0 && v < 6) {
-        counts[v]++;
-      }
-    }
-    return counts;
-  }
-
   // Update theoretical scores in bar graph based on current ligands and puzzle
+  // Uses adjacency-aware combinatorial probability scoring
   function updateTheoreticalScores() {
     if (!window.currentPuzzle || !window.currentPuzzle.tissues) return;
 
-    const ligandCounts = getLigandCounts();
+    // Pass ligandSlots directly (positions, not counts) for adjacency-aware scoring
+    const ligandPositions = ligandSlots.slice(0, 6);
 
     // Update latestStats with theoretical scores (keep actual if exists)
     latestStats = window.currentPuzzle.tissues.map((tissue, i) => {
       const existing = latestStats[i] || {};
       const theoryScore = typeof scoreTissue === 'function'
-        ? scoreTissue(ligandCounts, tissue.receptors)
+        ? scoreTissue(ligandPositions, tissue.receptors)
         : 0;
       return {
         name: tissue.name,

@@ -190,13 +190,13 @@ class Simulation {
 
   /**
    * Update all particles (physics, collision, binding)
-   * Uses adjacency-based binding: particles bind when enough leading-edge
-   * ligands match nearby receptors of the same color.
+   * Uses node-based binding: particles bind when a vertex node (between two ligands)
+   * matches a receptor node (between two adjacent receptors) with the same ordered pair.
    */
   updateParticles(frameCount) {
     const spriteRadius = this.physicsParams.particleSpriteSize * 0.5;
     const spriteSize = this.physicsParams.particleSpriteSize;
-    const bindingThreshold = 2;  // Require 2 adjacent matches to bind
+    const bindingThreshold = 1;  // Require 1 node match to bind
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -218,8 +218,8 @@ class Simulation {
       if (nearestCell) {
         this.attempts++;
 
-        // Attempt adjacency-based binding
-        const result = attemptAdjacencyBinding(
+        // Attempt node-based binding
+        const result = attemptNodeBinding(
           p,
           nearestCell,
           this.ligandPositions,
@@ -228,10 +228,10 @@ class Simulation {
         );
 
         if (result.success) {
-          // Bind particle to matched receptors
-          p.bindToMultiple(
-            result.matchedReceptors,
-            result.matchedLigands,
+          // Bind particle via matched nodes
+          p.bindToNodes(
+            result.matchedParticleNodes,
+            result.matchedCellNodes,
             spriteSize
           );
           this.bound++;
@@ -417,8 +417,8 @@ class Simulation {
     }
 
     const bindingPercentage = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100) : 0;
-    const ligandCounts = computeLigandCountsFromPositions(this.ligandPositions);
-    const theoreticalScore = scoreTissue(ligandCounts, this.tissue.receptors);
+    // Use node-based combinatorial probability model for theoretical scoring
+    const theoreticalScore = scoreTissue(this.ligandPositions, this.tissue.receptors, 1);
 
     return {
       bound: this.bound,

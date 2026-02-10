@@ -18,7 +18,7 @@ const PHYSICS_DEFAULTS = {
   turbulenceStrength: 0.15, // Strength of turbulent forces
   cellsPerTissue: 15,       // Number of cells per tissue area
   particleSpriteSize: 32,   // Size of particle sprite in pixels
-  maxReceptorsPerColor: 40, // Maximum receptors per color per cell
+  maxReceptorsPerColor: 20, // Maximum receptors per color per cell (reduced for visibility)
   testDuration: 600,        // Frames over which to release test particles (~10s at 60fps)
   defaultTestParticles: 1000 // Default number of particles in test mode
 };

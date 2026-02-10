@@ -6,6 +6,7 @@ class Cell {
     this.cy = cy;
     this.seed = seed;
     this.receptors = [];    // Array of Receptor objects
+    this.receptorNodes = []; // Array of {angle, x, y, pairId} - nodes between adjacent receptors
     this.bound = 0;         // Count of bound particles on this cell
 
     // Store receptor concentrations
@@ -114,6 +115,67 @@ class Cell {
         this.receptors.push(new Receptor(baseX, baseY, tipX, tipY, color, nx, ny, branchLen));
       }
     }
+
+    // Compute receptor nodes between adjacent receptors
+    this.computeReceptorNodes();
+  }
+
+  /**
+   * Compute nodes between physically adjacent receptors on the membrane.
+   * Nodes are created at the midpoint between adjacent receptor tips.
+   * Each node has a "pair identity" (colorA, colorB) where order matters.
+   * Receptors are sorted by angle around the cell center.
+   */
+  computeReceptorNodes() {
+    this.receptorNodes = [];
+
+    if (this.receptors.length < 2) return;
+
+    // Sort receptors by angle around cell center
+    const sortedReceptors = this.receptors.slice().map(r => {
+      const angle = Math.atan2(r.tipY - this.cy, r.tipX - this.cx);
+      return { receptor: r, angle: angle };
+    }).sort((a, b) => a.angle - b.angle);
+
+    // Create nodes between each pair of adjacent receptors (wrapping around)
+    for (let i = 0; i < sortedReceptors.length; i++) {
+      const curr = sortedReceptors[i];
+      const next = sortedReceptors[(i + 1) % sortedReceptors.length];
+
+      const r1 = curr.receptor;
+      const r2 = next.receptor;
+
+      // Node position is midpoint between the two receptor tips
+      const nodeX = (r1.tipX + r2.tipX) / 2;
+      const nodeY = (r1.tipY + r2.tipY) / 2;
+
+      // Node angle (for matching with particle nodes)
+      const nodeAngle = Math.atan2(nodeY - this.cy, nodeX - this.cx);
+
+      // Pair identity: ordered pair of colors (going clockwise/counterclockwise)
+      // The order is (current receptor color, next receptor color) in angular order
+      const pairId = Cell.makePairId(r1.color, r2.color);
+
+      this.receptorNodes.push({
+        x: nodeX,
+        y: nodeY,
+        angle: nodeAngle,
+        color1: r1.color,
+        color2: r2.color,
+        pairId: pairId,
+        bound: false,
+        receptor1: r1,
+        receptor2: r2
+      });
+    }
+  }
+
+  /**
+   * Create a unique pair ID from two colors. Order matters!
+   * Returns a string like "2-5" for colors 2 and 5.
+   */
+  static makePairId(color1, color2) {
+    return `${color1}-${color2}`;
   }
 
   // Render cell membrane and receptors to a graphics context
@@ -171,6 +233,16 @@ class Cell {
     return this.receptors.length;
   }
 
+  // Get count of bound receptor nodes
+  getBoundNodeCount() {
+    return this.receptorNodes.filter(n => n.bound).length;
+  }
+
+  // Get total receptor node count
+  getTotalNodes() {
+    return this.receptorNodes.length;
+  }
+
   // Reset all receptor bound states
   resetBindings() {
     this.bound = 0;
@@ -180,6 +252,10 @@ class Cell {
       receptor.latchedLigandColor = -1;
       receptor.latchedLigandX = 0;
       receptor.latchedLigandY = 0;
+    }
+    // Reset receptor node bound states
+    for (let node of this.receptorNodes) {
+      node.bound = false;
     }
   }
 

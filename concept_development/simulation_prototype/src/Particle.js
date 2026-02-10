@@ -162,6 +162,68 @@ class Particle {
     }
   }
 
+  // Bind particle via matched node pairs
+  // matchedParticleNodes: array of particle node objects
+  // matchedCellNodes: array of cell receptor node objects
+  bindToNodes(matchedParticleNodes, matchedCellNodes, spriteSize) {
+    if (matchedCellNodes.length === 0) return;
+
+    // Calculate centroid of matched cell nodes
+    let centroidX = 0;
+    let centroidY = 0;
+
+    for (let node of matchedCellNodes) {
+      centroidX += node.x;
+      centroidY += node.y;
+    }
+
+    centroidX /= matchedCellNodes.length;
+    centroidY /= matchedCellNodes.length;
+
+    // Calculate average outward direction from cell center
+    // (Use the first matched cell node's receptors to get the cell center)
+    const firstNode = matchedCellNodes[0];
+    const cellCx = (firstNode.receptor1.baseX + firstNode.receptor2.baseX) / 2;
+    const cellCy = (firstNode.receptor1.baseY + firstNode.receptor2.baseY) / 2;
+
+    let avgNx = centroidX - cellCx;
+    let avgNy = centroidY - cellCy;
+    const normLen = Math.sqrt(avgNx * avgNx + avgNy * avgNy) || 1;
+    avgNx /= normLen;
+    avgNy /= normLen;
+
+    // Position particle with offset from centroid
+    const offsetDist = spriteSize * 0.3;
+    this.x = centroidX + avgNx * offsetDist;
+    this.y = centroidY + avgNy * offsetDist;
+
+    // Orient particle to face the cell
+    this.angle = Math.atan2(-avgNy, -avgNx) + Math.PI / 2;
+
+    // Stop motion
+    this.vx = 0;
+    this.vy = 0;
+    this.angVel = 0;
+    this.bound = true;
+
+    // Mark all matched cell nodes and their receptors as bound
+    for (let i = 0; i < matchedCellNodes.length; i++) {
+      const cellNode = matchedCellNodes[i];
+      const particleNode = matchedParticleNodes[i];
+
+      cellNode.bound = true;
+
+      // Also mark the two receptors forming this node as bound/latched
+      cellNode.receptor1.bound = true;
+      cellNode.receptor1.latched = true;
+      cellNode.receptor1.latchedLigandColor = particleNode.color1;
+
+      cellNode.receptor2.bound = true;
+      cellNode.receptor2.latched = true;
+      cellNode.receptor2.latchedLigandColor = particleNode.color2;
+    }
+  }
+
   // Deflect particle around a cell
   deflectAroundCell(cell, spriteRadius, flowSpeed) {
     const dx = this.x - cell.cx;
