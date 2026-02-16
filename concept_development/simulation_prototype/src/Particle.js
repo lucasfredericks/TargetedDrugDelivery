@@ -98,8 +98,8 @@ class Particle {
       );
 
       // Map noise (0-1) to turbulent forces
-      const turbulentForceX = (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * 0.1;
-      const turbulentForceY = (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * 0.3;
+      const turbulentForceX = (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * physicsParams.turbulenceX;
+      const turbulentForceY = (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * physicsParams.turbulenceY;
 
       this.vx += turbulentForceX;
       this.vy += turbulentForceY;

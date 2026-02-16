@@ -31,6 +31,8 @@ class Simulation {
       flowSpeed: PHYSICS_DEFAULTS.flowSpeed,
       turbulenceScale: PHYSICS_DEFAULTS.turbulenceScale,
       turbulenceStrength: PHYSICS_DEFAULTS.turbulenceStrength,
+      turbulenceX: PHYSICS_DEFAULTS.turbulenceX,
+      turbulenceY: PHYSICS_DEFAULTS.turbulenceY,
       cellsPerTissue: PHYSICS_DEFAULTS.cellsPerTissue,
       particleSpriteSize: PHYSICS_DEFAULTS.particleSpriteSize
     };

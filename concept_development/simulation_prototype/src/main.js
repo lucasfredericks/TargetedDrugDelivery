@@ -285,11 +285,23 @@ function setupBroadcastChannel() {
         if (typeof msg.toxicity === 'number') {
           globalParams.toxicity = msg.toxicity;
         }
+        if (typeof msg.turbulenceX === 'number') {
+          globalParams.turbulenceX = msg.turbulenceX;
+        }
+        if (typeof msg.turbulenceY === 'number') {
+          globalParams.turbulenceY = msg.turbulenceY;
+        }
 
         // Propagate to all simulations
         for (let sim of simulations) {
           sim.setLigandPositions(globalParams.ligandPositions);
           sim.setToxicity(globalParams.toxicity);
+          if (typeof globalParams.turbulenceX === 'number') {
+            sim.physicsParams.turbulenceX = globalParams.turbulenceX;
+          }
+          if (typeof globalParams.turbulenceY === 'number') {
+            sim.physicsParams.turbulenceY = globalParams.turbulenceY;
+          }
         }
 
         // Handle commands

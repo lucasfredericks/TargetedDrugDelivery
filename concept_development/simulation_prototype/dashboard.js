@@ -14,6 +14,10 @@
   const puzzleView = document.getElementById('puzzleView');
   const particleCountEl = document.getElementById('particleCount');
   const particleCountLabel = document.getElementById('particleCountLabel');
+  const turbulenceXEl = document.getElementById('turbulenceX');
+  const turbulenceXLabel = document.getElementById('turbulenceXLabel');
+  const turbulenceYEl = document.getElementById('turbulenceY');
+  const turbulenceYLabel = document.getElementById('turbulenceYLabel');
   const loadBtn = document.getElementById('loadPuzzle');
   const resetBtn = document.getElementById('resetSim');
   const testBtn = document.getElementById('testBtn');
@@ -26,6 +30,8 @@
   const ligandSlots = [ -1, -1, -1, -1, -1, -1 ];
   let toxicity = 2; // default
   let particleCount = 1000;
+  let turbulenceX = 0.1;
+  let turbulenceY = 0.3;
 
   // Store latest stats from simulation for bar graph
   let latestStats = [];
@@ -160,6 +166,8 @@
       type: 'params',
       ligandPositions: ligandSlots.slice(0,6),
       toxicity: toxicity,
+      turbulenceX: turbulenceX,
+      turbulenceY: turbulenceY,
       command: command || null,
       puzzle: window.currentPuzzle || null
     };
@@ -248,6 +256,20 @@
   particleCountEl.oninput = () => {
     particleCount = parseInt(particleCountEl.value);
     particleCountLabel.textContent = particleCount;
+  };
+
+  // Turbulence X slider
+  turbulenceXEl.oninput = () => {
+    turbulenceX = parseFloat(turbulenceXEl.value);
+    turbulenceXLabel.textContent = turbulenceX.toFixed(2);
+    debouncedSendParams();
+  };
+
+  // Turbulence Y slider
+  turbulenceYEl.oninput = () => {
+    turbulenceY = parseFloat(turbulenceYEl.value);
+    turbulenceYLabel.textContent = turbulenceY.toFixed(2);
+    debouncedSendParams();
   };
 
   loadBtn.onclick = ()=>{

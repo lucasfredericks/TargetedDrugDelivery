@@ -16,6 +16,8 @@ const PHYSICS_DEFAULTS = {
   flowSpeed: 1.5,           // Base flow velocity from left to right
   turbulenceScale: 0.005,   // Scale for noise-based turbulence
   turbulenceStrength: 0.15, // Strength of turbulent forces
+  turbulenceX: 0.1,         // X-axis turbulence multiplier (0-1)
+  turbulenceY: 0.3,         // Y-axis turbulence multiplier (0-1)
   cellsPerTissue: 15,       // Number of cells per tissue area
   particleSpriteSize: 32,   // Size of particle sprite in pixels
   maxReceptorsPerColor: 20, // Maximum receptors per color per cell (reduced for visibility)
