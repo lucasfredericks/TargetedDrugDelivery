@@ -42,6 +42,13 @@ class Simulation {
     this.particleSprite = null;
     this.initialized = false;
 
+    // GPU fluid simulation (optional)
+    this.fluidSim = null;
+    this.useFluidSim = config.useFluidSim !== undefined ? config.useFluidSim : false;
+    this.fluidSimScale = config.fluidSimScale || 5; // Sim runs at 1/N of render resolution
+    this.showVelocityField = true; // Toggle with 'V' key
+    this.showPressureField = false; // Toggle with 'P' key
+
     // Test mode state
     this.testMode = false;
     this.testParticlesTotal = 0;
@@ -68,6 +75,33 @@ class Simulation {
 
     // Generate particle sprite
     this.regenerateSprite();
+
+    // Initialize GPU fluid simulation if enabled
+    console.log('Fluid sim check:', {
+      useFluidSim: this.useFluidSim,
+      fluidSimDefined: typeof FluidSimulation !== 'undefined'
+    });
+
+    if (this.useFluidSim && typeof FluidSimulation !== 'undefined') {
+      const simW = Math.floor(this.width / this.fluidSimScale);
+      const simH = Math.floor(this.height / this.fluidSimScale);
+      console.log(`Creating FluidSimulation: ${simW}x${simH} for ${this.width}x${this.height} render`);
+
+      this.fluidSim = new FluidSimulation(simW, simH, this.width, this.height);
+      // Note: FluidSimulation uses its own flowSpeed in grid units (default 0.0002)
+      // Do NOT override with physicsParams.flowSpeed which is in render pixels
+
+      if (this.fluidSim.initialize()) {
+        // Upload cell boundaries to GPU
+        this.fluidSim.uploadBoundaries(this.cells);
+        console.log('GPU fluid simulation enabled');
+      } else {
+        console.warn('GPU fluid simulation failed to initialize, falling back to Perlin noise');
+        this.fluidSim = null;
+      }
+    } else if (this.useFluidSim) {
+      console.error('FluidSimulation class not found - check script loading order');
+    }
 
     this.initialized = true;
   }
@@ -110,9 +144,14 @@ class Simulation {
       let attemptCount = 0;
 
       while (!placed && attemptCount < maxAttempts) {
-        const margin = maxPossibleRadius + this.minCellPadding;
-        const cx = Math.random() * (this.width - 2 * margin) + margin;
-        const cy = Math.random() * (this.height - 2 * margin) + margin;
+        // Horizontal margin (left/right) - full margin for inflow/outflow
+        const marginX = maxPossibleRadius + this.minCellPadding;
+        // Vertical margin (top/bottom) - reduced to allow cells closer to walls
+        // This creates more interesting flow patterns with the wall boundaries
+        const marginY = maxPossibleRadius * 0.5 + this.minCellPadding;
+
+        const cx = Math.random() * (this.width - 2 * marginX) + marginX;
+        const cy = Math.random() * (this.height - 2 * marginY) + marginY;
         // Base radius before expression scaling
         const baseRadius = Math.random() * (this.maxCellRadius - this.minCellRadius) + this.minCellRadius;
         const seed = Math.random() * 1000;
@@ -141,6 +180,11 @@ class Simulation {
         attemptCount++;
       }
     }
+
+    // Update fluid simulation boundaries if active
+    if (this.fluidSim && this.fluidSim.initialized) {
+      this.fluidSim.uploadBoundaries(this.cells);
+    }
   }
 
   /**
@@ -162,6 +206,11 @@ class Simulation {
     // Handle test mode particle spawning
     if (this.testMode) {
       this.updateTestModeSpawning(frameCount);
+    }
+
+    // Step GPU fluid simulation (runs independently, updates velocity cache periodically)
+    if (this.fluidSim && this.fluidSim.initialized) {
+      this.fluidSim.step(frameCount);
     }
 
     // Update particle physics
@@ -203,8 +252,8 @@ class Simulation {
 
       if (p.bound) continue;
 
-      // Update particle physics
-      p.update(this.physicsParams, this.width, this.height, frameCount);
+      // Update particle physics (pass fluidSim for GPU-based advection if available)
+      p.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim);
 
       // Remove out-of-bounds particles
       if (p.isOutOfBounds(this.width, this.height)) {
@@ -257,8 +306,23 @@ class Simulation {
     this.buffer.fill(240, 240, 255);
     this.buffer.rect(0, 0, this.width, this.height, 6);
 
-    // Draw flow direction indicators
-    this.renderFlowIndicators();
+    // Render fluid pressure field visualization if enabled (P key toggle)
+    if (this.showPressureField && this.fluidSim && this.fluidSim.initialized) {
+      this.fluidSim.renderPressureField(this.buffer, {
+        opacity: 160
+      });
+    }
+
+    // Render fluid velocity field visualization if enabled (V key toggle)
+    if (this.showVelocityField && this.fluidSim && this.fluidSim.initialized) {
+      this.fluidSim.renderVelocityField(this.buffer, {
+        showColors: !this.showPressureField, // Don't show velocity colors if pressure is shown
+        showArrows: true,
+        arrowSpacing: 50,
+        arrowScale: 20,
+        opacity: 160
+      });
+    }
 
     // Render cells
     for (let cell of this.cells) {
@@ -270,34 +334,6 @@ class Simulation {
     this.renderParticles();
 
     this.buffer.pop();
-  }
-
-  /**
-   * Render flow direction indicators (animated arrows)
-   */
-  renderFlowIndicators() {
-    this.buffer.stroke(200, 200, 220, 100);
-    this.buffer.strokeWeight(1);
-
-    const numArrows = 5;
-    const arrowSpacing = this.height / (numArrows + 1);
-    const arrowLength = 20;
-    const offset = (frameCount * 0.5) % 40;
-
-    for (let j = 0; j < numArrows; j++) {
-      const arrowY = arrowSpacing * (j + 1);
-      const numArrowsInRow = Math.floor(this.width / 40);
-
-      for (let k = 0; k < numArrowsInRow; k++) {
-        const arrowX = k * 40 - offset;
-        if (arrowX > -20 && arrowX < this.width + 20) {
-          this.buffer.line(arrowX, arrowY, arrowX + arrowLength, arrowY);
-          this.buffer.line(arrowX + arrowLength, arrowY, arrowX + arrowLength - 4, arrowY - 2);
-          this.buffer.line(arrowX + arrowLength, arrowY, arrowX + arrowLength - 4, arrowY + 2);
-        }
-      }
-    }
-    this.buffer.noStroke();
   }
 
   /**

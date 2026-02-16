@@ -13,9 +13,14 @@ class Particle {
   }
 
   // Create a particle spawned at the left edge of a tissue area
+  // Particles spawn within the channel (between top and bottom walls)
   static spawn(renderW, renderH, flowSpeed) {
     const x = -20;  // Spawn off-screen to the left
-    const y = Math.random() * (renderH - 20) + 10;
+    // Account for wall boundaries (wallThickness ~25px on each side)
+    const wallMargin = 40; // Stay clear of walls
+    const minY = wallMargin;
+    const maxY = renderH - wallMargin;
+    const y = Math.random() * (maxY - minY) + minY;
 
     // Base flow velocity left-to-right with minimal initial turbulence
     const baseVx = flowSpeed;
@@ -26,7 +31,8 @@ class Particle {
   }
 
   // Update particle physics (movement, turbulence, boundaries)
-  update(physicsParams, renderW, renderH, frameCount) {
+  // If fluidSim is provided, uses GPU-computed fluid velocities instead of Perlin noise
+  update(physicsParams, renderW, renderH, frameCount, fluidSim = null) {
     if (this.bound) return;
 
     // Update position
@@ -34,43 +40,76 @@ class Particle {
     this.y += this.vy;
     this.angle += this.angVel;
 
-    // Soft boundary forces (push particles back into channel)
-    const boundaryMargin = 20;
-    const boundaryForce = 0.3;
+    // Wall boundary collision (top and bottom walls)
+    // Wall thickness in render coordinates (matches FluidSimulation wall boundaries)
+    const wallThickness = 25; // Slightly larger than fluid sim walls for safety margin
+    const bounceRestitution = 0.6; // Energy retained after bounce (0-1)
+    const minBounceVel = 0.5; // Minimum velocity after bounce to prevent sticking
 
-    if (this.y < boundaryMargin) {
-      const dist = boundaryMargin - this.y;
-      this.vy += (dist / boundaryMargin) * boundaryForce;
+    // Top wall bounce
+    if (this.y < wallThickness) {
+      this.y = wallThickness + 1;
+      if (this.vy < 0) {
+        this.vy = -this.vy * bounceRestitution;
+        // Ensure minimum outward velocity
+        if (this.vy < minBounceVel) {
+          this.vy = minBounceVel + Math.random() * 0.5;
+        }
+        // Add slight random deflection
+        this.vx += (Math.random() - 0.5) * 0.3;
+      }
     }
-    if (this.y > renderH - boundaryMargin) {
-      const dist = this.y - (renderH - boundaryMargin);
-      this.vy -= (dist / boundaryMargin) * boundaryForce;
+
+    // Bottom wall bounce
+    if (this.y > renderH - wallThickness) {
+      this.y = renderH - wallThickness - 1;
+      if (this.vy > 0) {
+        this.vy = -this.vy * bounceRestitution;
+        // Ensure minimum outward velocity
+        if (this.vy > -minBounceVel) {
+          this.vy = -minBounceVel - Math.random() * 0.5;
+        }
+        // Add slight random deflection
+        this.vx += (Math.random() - 0.5) * 0.3;
+      }
     }
 
-    // Apply continuous turbulence using Perlin noise
-    const noiseX = noise(
-      this.x * physicsParams.turbulenceScale,
-      this.y * physicsParams.turbulenceScale,
-      frameCount * 0.01
-    );
-    const noiseY = noise(
-      this.x * physicsParams.turbulenceScale + 1000,
-      this.y * physicsParams.turbulenceScale,
-      frameCount * 0.01
-    );
+    // Apply turbulence from fluid simulation or Perlin noise
+    if (fluidSim && fluidSim.initialized) {
+      // GPU fluid-based advection
+      const fluidVel = fluidSim.getVelocityAt(this.x, this.y);
 
-    // Map noise (0-1) to turbulent forces
-    const turbulentForceX = (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * 0.1;
-    const turbulentForceY = (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * 0.3;
+      // Blend particle velocity toward fluid velocity
+      // Higher blend = more responsive to fluid, lower = more inertia
+      const blendFactor = 0.15;
+      this.vx = lerp(this.vx, fluidVel.vx + physicsParams.flowSpeed, blendFactor);
+      this.vy = lerp(this.vy, fluidVel.vy, blendFactor);
+    } else {
+      // Fallback: Perlin noise turbulence
+      const noiseX = noise(
+        this.x * physicsParams.turbulenceScale,
+        this.y * physicsParams.turbulenceScale,
+        frameCount * 0.01
+      );
+      const noiseY = noise(
+        this.x * physicsParams.turbulenceScale + 1000,
+        this.y * physicsParams.turbulenceScale,
+        frameCount * 0.01
+      );
 
-    this.vx += turbulentForceX;
-    this.vy += turbulentForceY;
+      // Map noise (0-1) to turbulent forces
+      const turbulentForceX = (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * 0.1;
+      const turbulentForceY = (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * 0.3;
 
-    // Gentle drift back toward base flow speed
-    this.vx = lerp(this.vx, physicsParams.flowSpeed, 0.01);
+      this.vx += turbulentForceX;
+      this.vy += turbulentForceY;
+
+      // Gentle drift back toward base flow speed
+      this.vx = lerp(this.vx, physicsParams.flowSpeed, 0.01);
+    }
 
     // Clamp velocity to prevent runaway
-    const maxSpeed = physicsParams.flowSpeed * 2;
+    const maxSpeed = physicsParams.flowSpeed * 2.5;
     const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (speed > maxSpeed) {
       this.vx = (this.vx / speed) * maxSpeed;

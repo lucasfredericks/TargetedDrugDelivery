@@ -17,11 +17,17 @@ let globalParams = {
 // Display areas for each simulation (set in setup)
 let displayAreas = [];
 
+// Fluid simulation toggle (set via URL param ?fluid=true)
+let useFluidSim = false;
+
 function setup() {
   // Detect single-tissue mode via URL param
   const tissueParam = parseInt(getQueryParam('tissue'));
   singleTissueMode = !isNaN(tissueParam) && tissueParam >= 0 && tissueParam <= 3;
   singleTissueIndex = singleTissueMode ? tissueParam : null;
+
+  // Detect fluid simulation mode via URL param ?fluid=true
+  useFluidSim = getQueryParam('fluid') === 'true';
 
   // Calculate canvas size
   const canvasSize = calculateCanvasSize(singleTissueMode, LAYOUT_DEFAULTS);
@@ -85,7 +91,9 @@ function createSimulations() {
       toxicity: globalParams.toxicity,
       fidelity: globalParams.fidelity,
       width: width,
-      height: height
+      height: height,
+      useFluidSim: useFluidSim,
+      fluidSimScale: 5  // Run fluid at 1/5th resolution (doubled from 1/10th)
     });
     sim.initialize();
     simulations.push(sim);
@@ -103,7 +111,9 @@ function createSimulations() {
         toxicity: globalParams.toxicity,
         fidelity: globalParams.fidelity,
         width: RENDER_RESOLUTION.width,
-        height: RENDER_RESOLUTION.height
+        height: RENDER_RESOLUTION.height,
+        useFluidSim: useFluidSim,
+        fluidSimScale: 5  // Run fluid at 1/5th resolution (doubled from 1/10th)
       });
       sim.initialize();
       simulations.push(sim);
@@ -190,14 +200,23 @@ function drawStatusBar() {
   textSize(14);
   textAlign(CENTER, BOTTOM);
 
+  const fluidLabel = useFluidSim ? ' [GPU Fluid]' : '';
+  const showingVelocity = simulations[0]?.showVelocityField;
+  const showingPressure = simulations[0]?.showPressureField;
+  let vizLabel = '';
+  if (showingVelocity && showingPressure) vizLabel = ' [Viz: V+P]';
+  else if (showingVelocity) vizLabel = ' [Viz: V]';
+  else if (showingPressure) vizLabel = ' [Viz: P]';
+
   if (testMode) {
     text(
-      `TEST MODE: ${totalReleased}/${totalTarget} released | Particles: ${totalParticles} (${freeParticles} flowing, ${boundParticles} bound)`,
+      `TEST MODE${fluidLabel}${vizLabel}: ${totalReleased}/${totalTarget} released | Particles: ${totalParticles} (${freeParticles} flowing, ${boundParticles} bound)`,
       width / 2,
       height - 8
     );
   } else {
-    text('Ready. Press Test button on dashboard to begin.', width / 2, height - 8);
+    const hint = useFluidSim ? ' Press V/P to toggle velocity/pressure field.' : '';
+    text(`Ready${fluidLabel}${vizLabel}. Press Test button on dashboard to begin.${hint}`, width / 2, height - 8);
   }
 }
 
@@ -396,3 +415,24 @@ window.resetSim = function() {
   }
   updateScoreboard();
 };
+
+// Keyboard controls
+function keyPressed() {
+  // 'V' key toggles velocity field visualization
+  if (key === 'v' || key === 'V') {
+    for (let sim of simulations) {
+      sim.showVelocityField = !sim.showVelocityField;
+    }
+    const state = simulations[0]?.showVelocityField ? 'ON' : 'OFF';
+    console.log(`Velocity field visualization: ${state}`);
+  }
+
+  // 'P' key toggles pressure field visualization
+  if (key === 'p' || key === 'P') {
+    for (let sim of simulations) {
+      sim.showPressureField = !sim.showPressureField;
+    }
+    const state = simulations[0]?.showPressureField ? 'ON' : 'OFF';
+    console.log(`Pressure field visualization: ${state}`);
+  }
+}
