@@ -3,10 +3,12 @@
 // Calculates the theoretical binding probability based on:
 // 1. The particle's ligand configuration (which colors are in which positions)
 // 2. The tissue's receptor concentrations (probability of each color being present)
-// 3. The adjacency requirement (need 2+ matches on the leading edge)
+// 3. Probabilistic binding based on match count:
+//    - 2+ ordered matching pairs: 85% bind probability
+//    - 1 matching pair: 20% bind probability
 //
 // The model considers all 6 possible collision orientations and computes
-// the probability of achieving 2+ adjacent ligand-receptor matches.
+// the expected binding probability using the adjacency matching system.
 
 // Define the 6 possible leading edges (each contains 3 adjacent ligand indices)
 // These correspond to the 6 possible collision orientations of the hexagonal particle
@@ -178,17 +180,44 @@ const LEADING_EDGE_NODES = [
 ];
 
 /**
+ * Calculate probability of exactly k successes for independent Bernoulli trials
+ * @param {number[]} probs - Array of success probabilities for each trial
+ * @param {number} k - Exact number of successes required
+ * @returns {number} Probability of exactly k successes
+ */
+function probabilityOfExactlyK(probs, k) {
+  const n = probs.length;
+
+  if (n === 0) return k === 0 ? 1 : 0;
+  if (k < 0 || k > n) return 0;
+
+  // Use dynamic programming
+  // dp[i][j] = probability of exactly j successes in first i trials
+  let dp = new Array(n + 1).fill(null).map(() => new Array(n + 1).fill(0));
+  dp[0][0] = 1;
+
+  for (let i = 0; i < n; i++) {
+    const p = probs[i];
+    const q = 1 - p;
+    for (let j = 0; j <= i; j++) {
+      if (dp[i][j] > 0) {
+        dp[i + 1][j] += dp[i][j] * q;     // Failure
+        dp[i + 1][j + 1] += dp[i][j] * p; // Success
+      }
+    }
+  }
+
+  return dp[n][k];
+}
+
+/**
  * Node-Based Combinatorial Probability scoring model
  *
- * Calculates the theoretical binding probability for node-based binding:
- * 1. Compute particle vertex nodes (between adjacent ligands)
+ * Calculates the theoretical binding probability for deterministic node-based binding:
+ * 1. Compute particle vertex nodes (ordered pairs between adjacent ligands)
  * 2. For each collision orientation, determine which nodes are on leading edge
- * 3. Calculate probability of finding matching receptor node pairs
+ * 3. Calculate probability of finding at least 1 matching receptor node pair
  * 4. Average across all 6 orientations
- *
- * The probability of finding a matching receptor node (A,B) depends on:
- * - Receptor concentrations for colors A and B
- * - The likelihood of having A and B adjacent on the membrane
  *
  * @param {number[]} ligandPositions - Array of 6 ligand colors (-1 to 5, -1 = empty)
  * @param {number[]} receptors - Array of 6 receptor concentrations (0 to 1)
@@ -207,7 +236,7 @@ function scoreTissueNodes(ligandPositions, receptors, threshold = 1) {
     const color1 = ligandPositions[leftIdx];
     const color2 = ligandPositions[rightIdx];
 
-    // Node is only active if both ligands are present
+    // Node is only active if both adjacent ligands are present
     const active = (typeof color1 === 'number' && color1 >= 0 && color1 < 6) &&
                    (typeof color2 === 'number' && color2 >= 0 && color2 < 6);
 
@@ -238,35 +267,20 @@ function scoreTissueNodes(ligandPositions, receptors, threshold = 1) {
     const leadingNodes = edge.map(i => particleNodes[i]).filter(n => n.active);
 
     if (leadingNodes.length === 0) {
-      // No active nodes on this edge, probability is 0
-      totalProbability += 0;
       continue;
     }
 
-    // Calculate probability of at least 'threshold' matches
-    // For each active node, calculate P(finding matching receptor node pair)
+    // Calculate probability of finding matching receptor node pair for each node
     const matchProbs = leadingNodes.map(node => {
-      // Probability of receptor node (A, B) existing
-      // This is approximately proportional to P(receptor A) * P(receptor B | adjacent to A)
-      // Since receptors are randomly distributed, P(B adjacent to A) ≈ P(B) = cB / totalConc
       const cA = receptors[node.color1] || 0;
       const cB = receptors[node.color2] || 0;
-
-      // The probability of finding an (A,B) pair adjacent is approximately cA * cB
-      // Scaled by spatial coverage factor (how likely the pair is within match radius)
-      // With many receptors, there are many adjacent pairs, increasing match probability
       const pairProbability = cA * cB;
-
-      // Spatial coverage: with ~20 receptors per color at full concentration,
-      // and match radius covering ~10% of circumference, there's good coverage
-      // Scale by a coverage factor that accounts for receptor density
-      const avgReceptors = totalConc * 20;  // Average total receptors (matches maxReceptorsPerColor)
-      const coverageFactor = Math.min(1, avgReceptors / 10);  // Saturates around 10 receptors
-
+      const avgReceptors = totalConc * 20;
+      const coverageFactor = Math.min(1, avgReceptors / 10);
       return Math.min(1, pairProbability * coverageFactor);
     });
 
-    // Calculate P(at least threshold matches) using combinatorial probability
+    // Calculate P(at least threshold matches)
     const edgeProb = probabilityOfKOrMore(matchProbs, threshold);
     totalProbability += edgeProb;
   }
@@ -305,12 +319,15 @@ function scoreTissueLegacy(ligandCounts, receptors) {
  * For backward compatibility, it also accepts ligandCounts (array of 6 counts),
  * but this is detected by checking if any value > 5 (which can't be a valid position).
  *
+ * Binding probabilities are built into the model:
+ * - 2+ ordered matching pairs: 85% bind probability
+ * - 1 matching pair: 20% bind probability
+ *
  * @param {number[]} ligandPositions - Array of 6 ligand colors (-1 to 5)
  * @param {number[]} receptors - Array of 6 receptor concentrations (0 to 1)
- * @param {number} threshold - Minimum node matches required (default 1)
  * @returns {number} Theoretical binding percentage (0-100)
  */
-function scoreTissue(ligandPositions, receptors, threshold = 1) {
+function scoreTissue(ligandPositions, receptors) {
   if (!ligandPositions || !receptors) return 0;
 
   // Check if input is ligandCounts (any value > 5 means it's a count, not a color index)
@@ -334,16 +351,16 @@ function scoreTissue(ligandPositions, receptors, threshold = 1) {
     positions = ligandPositions;
   }
 
-  return scoreTissueNodes(positions, receptors, threshold);
+  return scoreTissueNodes(positions, receptors);
 }
 
 /**
  * Utility: compute scores for all tissues
  */
-function scoreAll(ligandPositionsOrCounts, tissues, threshold = 2) {
+function scoreAll(ligandPositionsOrCounts, tissues) {
   let out = {};
   for (let t of tissues) {
-    out[t.name] = scoreTissue(ligandPositionsOrCounts, t.receptors, threshold);
+    out[t.name] = scoreTissue(ligandPositionsOrCounts, t.receptors);
   }
   return out;
 }
@@ -355,6 +372,7 @@ window.scoreTissueAdjacency = scoreTissueAdjacency;
 window.scoreTissueLegacy = scoreTissueLegacy;
 window.scoreAll = scoreAll;
 window.probabilityOfKOrMore = probabilityOfKOrMore;
+window.probabilityOfExactlyK = probabilityOfExactlyK;
 window.edgeBindingProbability = edgeBindingProbability;
 window.LEADING_EDGES = LEADING_EDGES;
 window.LEADING_EDGE_NODES = LEADING_EDGE_NODES;

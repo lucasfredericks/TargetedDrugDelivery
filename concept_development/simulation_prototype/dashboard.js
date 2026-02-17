@@ -48,7 +48,19 @@
     channel.onmessage = (ev) => {
       const msg = ev.data || {};
       if (msg.type === 'stats') {
-        latestStats = msg.stats || [];
+        // Merge incoming stats with existing stats by tissue name
+        // This keeps all 4 tissues visible even when only 1 simulation is running
+        const incomingStats = msg.stats || [];
+        for (let incoming of incomingStats) {
+          const existingIdx = latestStats.findIndex(s => s.name === incoming.name);
+          if (existingIdx >= 0) {
+            // Update existing entry with actual binding results
+            latestStats[existingIdx].bindingPercentage = incoming.bindingPercentage;
+            latestStats[existingIdx].bound = incoming.bound;
+            // Also update theoretical score from simulation
+            latestStats[existingIdx].theoreticalScore = incoming.theoreticalScore;
+          }
+        }
         updateBarGraph();
       }
     };

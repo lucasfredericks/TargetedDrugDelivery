@@ -59,46 +59,37 @@ class Receptor {
     g.noStroke();
   }
 
-  // Render latched (closed) receptor gripping the ligand
+  // Render latched receptor as a filled triangle (Y with fork filled in)
   renderLatched(g, ang) {
-    g.strokeWeight(2.5);
-
-    // Use the ligand's color for the latched receptor (shows successful binding)
+    // Determine color
+    let col;
     if (typeof this.latchedLigandColor === 'number' && this.latchedLigandColor >= 0) {
-      g.stroke(colorForIndex(this.latchedLigandColor));
+      col = colorForIndex(this.latchedLigandColor);
     } else {
-      g.stroke(colorForIndex(this.color));
+      col = colorForIndex(this.color);
     }
 
     // Draw stem
+    g.strokeWeight(2);
+    g.stroke(col);
     g.line(this.baseX, this.baseY, this.tipX, this.tipY);
 
-    // Closed branches: pinch together (5° instead of 30°)
-    const closedAngle = Math.PI / 36;  // ~5 degrees
-    const a1 = ang + closedAngle;
-    const a2 = ang - closedAngle;
-
-    // Extend branches slightly when latched
+    // Draw filled triangle from tip to the two branch endpoints (Y fork filled in)
+    const branchAngle = Math.PI / 6; // 30° same as open Y
     const latchedLen = this.branchLen * 1.2;
+    const a1 = ang + branchAngle;
+    const a2 = ang - branchAngle;
     const b1x = this.tipX + Math.cos(a1) * latchedLen;
     const b1y = this.tipY + Math.sin(a1) * latchedLen;
     const b2x = this.tipX + Math.cos(a2) * latchedLen;
     const b2y = this.tipY + Math.sin(a2) * latchedLen;
 
-    g.line(this.tipX, this.tipY, b1x, b1y);
-    g.line(this.tipX, this.tipY, b2x, b2y);
+    g.fill(col);
+    g.stroke(col);
+    g.strokeWeight(1);
+    g.triangle(this.tipX, this.tipY, b1x, b1y, b2x, b2y);
 
-    // Draw a small circle at the grip point to emphasize the latch
-    g.noStroke();
-    if (typeof this.latchedLigandColor === 'number' && this.latchedLigandColor >= 0) {
-      g.fill(colorForIndex(this.latchedLigandColor));
-    } else {
-      g.fill(colorForIndex(this.color));
-    }
-    const gripX = this.tipX + Math.cos(ang) * (latchedLen * 0.6);
-    const gripY = this.tipY + Math.sin(ang) * (latchedLen * 0.6);
-    g.circle(gripX, gripY, 4);
-
+    g.noFill();
     g.noStroke();
   }
 

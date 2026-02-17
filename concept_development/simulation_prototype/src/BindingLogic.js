@@ -220,31 +220,25 @@ function getLeadingEdgeNodes(particle, cell, particleNodes) {
 
 /**
  * Attempt node-based binding between particle and cell.
- * Binding succeeds if at least one leading-edge particle node matches
- * a nearby receptor node with the same ordered pair identity.
+ * Binding is deterministic: succeeds if at least 1 ordered pair matches.
  *
  * @param {Object} particle - Particle with x, y, angle properties
  * @param {Object} cell - Cell with receptorNodes array
  * @param {number[]} ligandPositions - Array of 6 ligand colors
  * @param {number} spriteSize - Size of particle sprite
- * @param {number} threshold - Minimum node matches required (default 1)
- * @returns {Object} {success, matchedNodes, matchCount}
+ * @returns {Object} {success, matchedParticleNodes, matchedCellNodes, matchCount}
  */
-function attemptNodeBinding(particle, cell, ligandPositions, spriteSize, threshold = 1) {
+function attemptNodeBinding(particle, cell, ligandPositions, spriteSize) {
   const matchRadius = spriteSize * 0.6;
 
-  // Get particle vertex nodes
+  // Get particle vertex nodes (ordered pairs)
   const particleNodes = getParticleNodes(particle, spriteSize, ligandPositions);
 
   // Find nodes on the leading edge
   const leadingNodes = getLeadingEdgeNodes(particle, cell, particleNodes);
 
-  if (leadingNodes.length === 0) {
-    return { success: false, matchCount: 0 };
-  }
-
   // Try to match leading particle nodes with cell receptor nodes
-  let matches = 0;
+  let nodeMatches = 0;
   const matchedParticleNodes = [];
   const matchedCellNodes = [];
   const usedCellNodes = new Set();
@@ -274,23 +268,24 @@ function attemptNodeBinding(particle, cell, ligandPositions, spriteSize, thresho
     }
 
     if (bestCellNode) {
-      matches++;
+      nodeMatches++;
       matchedParticleNodes.push(pNode);
       matchedCellNodes.push(bestCellNode.node);
       usedCellNodes.add(bestCellNode.index);
     }
   }
 
-  if (matches >= threshold) {
+  // Deterministic binding: bind if at least 1 ordered pair matches
+  if (nodeMatches >= 1) {
     return {
       success: true,
       matchedParticleNodes,
       matchedCellNodes,
-      matchCount: matches
+      matchCount: nodeMatches
     };
   }
 
-  return { success: false, matchCount: matches };
+  return { success: false, matchCount: 0 };
 }
 
 // =============================================================================

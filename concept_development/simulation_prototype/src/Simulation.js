@@ -39,6 +39,7 @@ class Simulation {
 
     // Internal state
     this.particles = [];
+    this.debris = [];  // Free-floating ligand debris from absorbed particles
     this.cells = [];
     this.buffer = null;
     this.particleSprite = null;
@@ -217,6 +218,12 @@ class Simulation {
 
     // Update particle physics
     this.updateParticles(frameCount);
+
+    // Update absorbing/absorbed particles
+    this.updateAbsorbingParticles(frameCount);
+
+    // Update debris
+    this.updateDebris(frameCount);
   }
 
   /**
@@ -247,7 +254,6 @@ class Simulation {
   updateParticles(frameCount) {
     const spriteRadius = this.physicsParams.particleSpriteSize * 0.5;
     const spriteSize = this.physicsParams.particleSpriteSize;
-    const bindingThreshold = 1;  // Require 1 node match to bind
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -269,28 +275,65 @@ class Simulation {
       if (nearestCell) {
         this.attempts++;
 
-        // Attempt node-based binding
+        // Attempt node-based binding (probabilistic: 85% for 2+ matches, 20% for 1 match)
         const result = attemptNodeBinding(
           p,
           nearestCell,
           this.ligandPositions,
-          spriteSize,
-          bindingThreshold
+          spriteSize
         );
 
         if (result.success) {
-          // Bind particle via matched nodes
-          p.bindToNodes(
-            result.matchedParticleNodes,
-            result.matchedCellNodes,
-            spriteSize
-          );
+          // Mark receptors as bound/latched (visual update)
+          for (let j = 0; j < result.matchedCellNodes.length; j++) {
+            const cellNode = result.matchedCellNodes[j];
+            const particleNode = result.matchedParticleNodes[j];
+            cellNode.bound = true;
+            cellNode.receptor1.bound = true;
+            cellNode.receptor1.latched = true;
+            cellNode.receptor1.latchedLigandColor = particleNode.color1;
+            cellNode.receptor2.bound = true;
+            cellNode.receptor2.latched = true;
+            cellNode.receptor2.latchedLigandColor = particleNode.color2;
+          }
+
+          // Spawn debris from the ligands before absorption
+          const newDebris = Debris.spawnFromParticle(p, this.ligandPositions, spriteSize);
+          this.debris.push(...newDebris);
+
+          // Start drug absorption toward cell center
+          p.startAbsorption(nearestCell);
           this.bound++;
           nearestCell.bound += result.matchCount;
         } else {
           // Deflect around cell
           p.deflectAroundCell(nearestCell, spriteRadius, this.physicsParams.flowSpeed);
         }
+      }
+    }
+  }
+
+  /**
+   * Update particles that are absorbing or absorbed
+   */
+  updateAbsorbingParticles(frameCount) {
+    for (let p of this.particles) {
+      if (p.absorbing || p.absorbed) {
+        p.updateAbsorption(this.physicsParams, frameCount);
+      }
+    }
+  }
+
+  /**
+   * Update free-floating debris (ligand pieces)
+   */
+  updateDebris(frameCount) {
+    for (let i = this.debris.length - 1; i >= 0; i--) {
+      const d = this.debris[i];
+      d.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim, this.cells);
+
+      if (d.isOutOfBounds(this.width, this.height)) {
+        this.debris.splice(i, 1);
       }
     }
   }
@@ -332,6 +375,9 @@ class Simulation {
       cell.renderBindingOverlay(this.buffer, this.testMode);
     }
 
+    // Render debris (behind particles)
+    this.renderDebris();
+
     // Render particles
     this.renderParticles();
 
@@ -343,7 +389,16 @@ class Simulation {
    */
   renderParticles() {
     for (let p of this.particles) {
-      p.render(this.buffer, this.particleSprite, this.physicsParams.particleSpriteSize);
+      p.render(this.buffer, this.particleSprite, this.physicsParams.particleSpriteSize, this.toxicity);
+    }
+  }
+
+  /**
+   * Render free-floating debris to buffer
+   */
+  renderDebris() {
+    for (let d of this.debris) {
+      d.render(this.buffer, this.physicsParams.particleSpriteSize);
     }
   }
 
@@ -408,8 +463,9 @@ class Simulation {
     this.testStartFrame = frameCount;
     this.testDuration = duration || PHYSICS_DEFAULTS.testDuration;
 
-    // Clear particles and reset binding states
+    // Clear particles, debris, and reset binding states
     this.particles = [];
+    this.debris = [];
     this.bound = 0;
     this.attempts = 0;
 
@@ -430,6 +486,7 @@ class Simulation {
    */
   reset() {
     this.particles = [];
+    this.debris = [];
     this.testMode = false;
     this.testParticlesReleased = 0;
     this.bound = 0;
@@ -456,7 +513,8 @@ class Simulation {
 
     const bindingPercentage = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100) : 0;
     // Use node-based combinatorial probability model for theoretical scoring
-    const theoreticalScore = scoreTissue(this.ligandPositions, this.tissue.receptors, 1);
+    // Binding probabilities: 85% for 2+ matches, 20% for 1 match
+    const theoreticalScore = scoreTissue(this.ligandPositions, this.tissue.receptors);
 
     return {
       bound: this.bound,

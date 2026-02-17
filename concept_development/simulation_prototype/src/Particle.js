@@ -10,6 +10,12 @@ class Particle {
     this.angVel = (Math.random() - 0.5) * 0.06;
     this.bound = false;
     this.cellIndex = -1;    // Index of nearest cell (for collision tracking)
+
+    // Absorption state
+    this.absorbing = false;   // Drug is accelerating toward cell center
+    this.absorbed = false;    // Drug is inside the cell, drifting gently
+    this.targetCell = null;   // Cell being absorbed into
+    this.absorbTimer = 0;     // Frames since absorption started
   }
 
   // Create a particle spawned at the left edge of a tissue area
@@ -263,6 +269,106 @@ class Particle {
     }
   }
 
+  // Begin absorption: drug hexagon accelerates toward cell center
+  startAbsorption(cell) {
+    this.absorbing = true;
+    this.absorbed = false;
+    this.bound = true; // keep it flagged as bound so normal physics skip it
+    this.targetCell = cell;
+    this.absorbTimer = 0;
+    this.angVel = 0;
+  }
+
+  // Update absorption physics each frame
+  updateAbsorption(physicsParams, frameCount) {
+    if (this.absorbing && !this.absorbed) {
+      this.absorbTimer++;
+
+      // Accelerate toward cell center
+      const dx = this.targetCell.cx - this.x;
+      const dy = this.targetCell.cy - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Transition to absorbed once inside the cell membrane
+      // Keep momentum so the drug carries inward and bounces around
+      const membraneRadius = this.targetCell.radius * 0.85;
+      if (dist < membraneRadius) {
+        this.absorbing = false;
+        this.absorbed = true;
+        // Dampen entry speed but keep direction
+        this.vx *= 0.4;
+        this.vy *= 0.4;
+        return;
+      }
+
+      // Accelerate toward center to push through membrane
+      const accel = 0.8 + this.absorbTimer * 0.1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      this.vx += nx * accel;
+      this.vy += ny * accel;
+
+      // Clamp speed
+      const maxAbsorbSpeed = 12;
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      if (speed > maxAbsorbSpeed) {
+        this.vx = (this.vx / speed) * maxAbsorbSpeed;
+        this.vy = (this.vy / speed) * maxAbsorbSpeed;
+      }
+
+      this.x += this.vx;
+      this.y += this.vy;
+      this.angle += 0.05; // gentle spin during absorption
+    } else if (this.absorbed) {
+      // Gentle drag to slowly lose speed over time
+      this.vx *= 0.995;
+      this.vy *= 0.995;
+
+      // Small Perlin noise nudges (additive, not replacing velocity)
+      const noiseScale = physicsParams.turbulenceScale * 2;
+      const noiseIntensity = 0.08;
+      const noiseX = noise(
+        this.x * noiseScale + 500,
+        this.y * noiseScale + 500,
+        frameCount * 0.005
+      );
+      const noiseY = noise(
+        this.x * noiseScale + 1500,
+        this.y * noiseScale + 500,
+        frameCount * 0.005
+      );
+
+      this.vx += (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * noiseIntensity;
+      this.vy += (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * noiseIntensity;
+
+      this.x += this.vx;
+      this.y += this.vy;
+      this.angle += 0.01;
+
+      // Bounce off inner cell wall
+      const dx = this.x - this.targetCell.cx;
+      const dy = this.y - this.targetCell.cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const wallRadius = this.targetCell.radius * 0.8;
+      if (dist > wallRadius) {
+        // Reflect velocity off the inner membrane
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const vDotN = this.vx * nx + this.vy * ny;
+        if (vDotN > 0) {
+          this.vx -= 2 * vDotN * nx;
+          this.vy -= 2 * vDotN * ny;
+          // Lose a little energy on bounce
+          this.vx *= 0.8;
+          this.vy *= 0.8;
+        }
+        // Push back inside
+        this.x = this.targetCell.cx + nx * (wallRadius - 1);
+        this.y = this.targetCell.cy + ny * (wallRadius - 1);
+      }
+    }
+  }
+
   // Deflect particle around a cell
   deflectAroundCell(cell, spriteRadius, flowSpeed) {
     const dx = this.x - cell.cx;
@@ -290,7 +396,13 @@ class Particle {
   }
 
   // Render particle to a graphics context
-  render(g, sprite, spriteSize) {
+  render(g, sprite, spriteSize, toxicity) {
+    if (this.absorbing || this.absorbed) {
+      // Draw only the drug hexagon (no ligands)
+      this.renderDrugHexagon(g, spriteSize, toxicity);
+      return;
+    }
+
     if (sprite) {
       g.push();
       g.translate(this.x, this.y);
@@ -309,6 +421,29 @@ class Particle {
       g.fill(this.bound ? 180 : 120);
       g.circle(this.x, this.y, 4);
     }
+  }
+
+  // Render just the drug hexagon (during/after absorption)
+  renderDrugHexagon(g, spriteSize, toxicity) {
+    const hexR = spriteSize * 0.35;
+    const alpha = this.absorbed ? 200 : 255;
+
+    g.push();
+    g.translate(this.x, this.y);
+    g.rotate(this.angle);
+
+    const toxColor = TOXICITY_COLORS[toxicity] || TOXICITY_COLORS[2];
+    g.fill(g.red(g.color(toxColor)), g.green(g.color(toxColor)), g.blue(g.color(toxColor)), alpha);
+    g.stroke(34, 34, 34, alpha);
+    g.strokeWeight(0.6);
+    g.beginShape();
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + i * Math.PI * 2 / 6;
+      g.vertex(Math.cos(a) * hexR, Math.sin(a) * hexR);
+    }
+    g.endShape(CLOSE);
+    g.noStroke();
+    g.pop();
   }
 }
 
