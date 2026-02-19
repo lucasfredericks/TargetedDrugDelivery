@@ -11,8 +11,9 @@
     .tissues{margin-top:12px}
 
     /* Bar graph styles */
-    #resultsGraph{margin-top:16px;padding:12px;background:#f8f8f8;border-radius:4px;max-width:600px}
-    #resultsGraph h4{margin:0 0 12px 0}
+    #resultsGraphs{display:flex;gap:16px;margin-top:16px;max-width:820px}
+    .results-section{flex:1;padding:12px;background:#f8f8f8;border-radius:4px}
+    .results-section h4{margin:0 0 10px 0}
     .tissue-bar-row{display:flex;align-items:center;margin-bottom:8px}
     .tissue-bar-label{width:60px;font-size:12px;font-weight:bold}
     .tissue-bar-container{flex:1;display:flex;flex-direction:column;gap:2px}
@@ -22,9 +23,6 @@
     .bar-theory{background:linear-gradient(90deg,#6eb5ff,#2196f3)}
     .bar-actual{background:linear-gradient(90deg,#81c784,#4caf50)}
     .bar-value{font-size:11px;width:45px;text-align:right}
-    .bar-legend{display:flex;gap:16px;margin-bottom:8px;font-size:11px}
-    .legend-item{display:flex;align-items:center;gap:4px}
-    .legend-color{width:12px;height:12px;border-radius:2px}
   </style>
 </head>
 <body>
@@ -39,6 +37,7 @@
       <div style="margin-bottom:8px">
         <label>Turbulence X: <input id="turbulenceX" type="range" min="0" max="1" step="0.01" value="0.1"><span id="turbulenceXLabel">0.10</span></label>
         <label style="margin-left:12px">Turbulence Y: <input id="turbulenceY" type="range" min="0" max="1" step="0.01" value="0.3"><span id="turbulenceYLabel">0.30</span></label>
+        <label style="margin-left:12px">Cell death threshold: <input id="deathThreshold" type="range" min="1" max="10" step="1" value="5"><span id="deathThresholdLabel">5</span></label>
       </div>
       <div style="margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -54,16 +53,19 @@
     <canvas id="npPreview" width="220" height="160"></canvas>
   </div>
 
-  <!-- Results bar graph -->
-  <div id="resultsGraph">
-    <h4>Binding Results</h4>
-    <div class="bar-legend">
-      <div class="legend-item"><div class="legend-color bar-theory"></div>Theory</div>
-      <div class="legend-item"><div class="legend-color bar-actual"></div>Actual</div>
+  <!-- Results graphs: two separate sections -->
+  <div id="resultsGraphs">
+    <div class="results-section">
+      <h4>Binding Affinity</h4>
+      <div id="affinityContent">
+        <div style="color:#888;font-size:12px">Configure tissues and ligands</div>
+      </div>
     </div>
-    <div id="barGraphContent">
-      <!-- Bars will be populated by JavaScript -->
-      <div style="color:#888;font-size:12px">Run a test to see results</div>
+    <div class="results-section">
+      <h4>Cell Kill Rate</h4>
+      <div id="killRateContent">
+        <div style="color:#888;font-size:12px">Run a test to see results</div>
+      </div>
     </div>
   </div>
 

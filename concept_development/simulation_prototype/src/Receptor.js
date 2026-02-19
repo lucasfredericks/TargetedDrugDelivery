@@ -15,6 +15,36 @@ class Receptor {
     this.latchedLigandColor = -1;  // Color of latched ligand
     this.latchedLigandX = 0;       // Position of latched ligand
     this.latchedLigandY = 0;
+
+    // Refractory state
+    this.refractory = false;       // In refractory period (cooling down after binding)
+    this.refractoryTimer = 0;      // Frames elapsed in refractory period
+    this.refractoryDuration = 10000; // Effectively permanent for the duration of a test run
+    this.refractoryColor = -1;       // Ligand color to fade out during refractory
+  }
+
+  // Begin refractory period (called when the drug has been absorbed)
+  startRefractory() {
+    this.refractory = true;
+    this.refractoryTimer = 0;
+    this.refractoryColor = this.latchedLigandColor;
+    // Clear the latched/bound state so it renders as refractory, not latched
+    this.latched = false;
+    this.bound = false;
+    this.latchedLigandColor = -1;
+  }
+
+  // Tick refractory timer. Returns true if refractory just ended.
+  updateRefractory() {
+    if (!this.refractory) return false;
+    this.refractoryTimer++;
+    if (this.refractoryTimer >= this.refractoryDuration) {
+      this.refractory = false;
+      this.refractoryTimer = 0;
+      this.refractoryColor = -1;
+      return true;
+    }
+    return false;
   }
 
   // Render Y-shaped receptor to a graphics context
@@ -22,10 +52,10 @@ class Receptor {
     const ang = Math.atan2(this.ny, this.nx);
 
     if (this.latched) {
-      // Latched state: branches close around the ligand
       this.renderLatched(g, ang);
+    } else if (this.refractory) {
+      this.renderRefractory(g, ang);
     } else {
-      // Normal state: open Y-shape
       this.renderOpen(g, ang);
     }
   }
@@ -90,6 +120,41 @@ class Receptor {
     g.triangle(this.tipX, this.tipY, b1x, b1y, b2x, b2y);
 
     g.noFill();
+    g.noStroke();
+  }
+
+  // Render receptor during refractory period.
+  // The ligand color triangle fades out over refractoryDuration frames,
+  // showing how much binding capacity remains.
+  renderRefractory(g, ang) {
+    const progress = this.refractoryTimer / this.refractoryDuration; // 0 -> 1
+    const fadeAlpha = Math.round(Math.max(0, 1 - progress) * 255);  // 255 -> 0
+
+    const receptorCol = colorForIndex(this.color);
+    const branchAngle = Math.PI / 6;
+    const latchedLen = this.branchLen * 1.2;
+    const a1 = ang + branchAngle;
+    const a2 = ang - branchAngle;
+    const b1x = this.tipX + Math.cos(a1) * latchedLen;
+    const b1y = this.tipY + Math.sin(a1) * latchedLen;
+    const b2x = this.tipX + Math.cos(a2) * latchedLen;
+    const b2y = this.tipY + Math.sin(a2) * latchedLen;
+
+    // Stem in receptor color
+    g.strokeWeight(2);
+    g.stroke(receptorCol);
+    g.line(this.baseX, this.baseY, this.tipX, this.tipY);
+
+    // Fading filled triangle in ligand color
+    if (fadeAlpha > 2 && typeof this.refractoryColor === 'number' && this.refractoryColor >= 0) {
+      const ligCol = colorForIndex(this.refractoryColor);
+      g.fill(g.red(ligCol), g.green(ligCol), g.blue(ligCol), fadeAlpha);
+      g.stroke(g.red(ligCol), g.green(ligCol), g.blue(ligCol), fadeAlpha);
+      g.strokeWeight(1);
+      g.triangle(this.tipX, this.tipY, b1x, b1y, b2x, b2y);
+      g.noFill();
+    }
+
     g.noStroke();
   }
 

@@ -18,11 +18,14 @@
   const turbulenceXLabel = document.getElementById('turbulenceXLabel');
   const turbulenceYEl = document.getElementById('turbulenceY');
   const turbulenceYLabel = document.getElementById('turbulenceYLabel');
+  const deathThresholdEl = document.getElementById('deathThreshold');
+  const deathThresholdLabel = document.getElementById('deathThresholdLabel');
   const loadBtn = document.getElementById('loadPuzzle');
   const resetBtn = document.getElementById('resetSim');
   const testBtn = document.getElementById('testBtn');
   const randomizeLigandsBtn = document.getElementById('randomizeLigands');
-  const barGraphContent = document.getElementById('barGraphContent');
+  const affinityContent = document.getElementById('affinityContent');
+  const killRateContent = document.getElementById('killRateContent');
 
   // Six color options
   const colors = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'];
@@ -32,6 +35,7 @@
   let particleCount = 1000;
   let turbulenceX = 0.1;
   let turbulenceY = 0.3;
+  let deathThreshold = 5;
 
   // Store latest stats from simulation for bar graph
   let latestStats = [];
@@ -54,10 +58,9 @@
         for (let incoming of incomingStats) {
           const existingIdx = latestStats.findIndex(s => s.name === incoming.name);
           if (existingIdx >= 0) {
-            // Update existing entry with actual binding results
-            latestStats[existingIdx].bindingPercentage = incoming.bindingPercentage;
-            latestStats[existingIdx].bound = incoming.bound;
-            // Also update theoretical score from simulation
+            latestStats[existingIdx].absorptionEfficiency = incoming.absorptionEfficiency;
+            latestStats[existingIdx].totalAbsorbedDrugs = incoming.totalAbsorbedDrugs;
+            latestStats[existingIdx].attempts = incoming.attempts;
             latestStats[existingIdx].theoreticalScore = incoming.theoreticalScore;
           }
         }
@@ -125,48 +128,71 @@
       return {
         name: tissue.name,
         theoreticalScore: theoryScore,
-        bindingPercentage: existing.bindingPercentage || 0,
-        bound: existing.bound || 0
+        absorptionEfficiency: existing.absorptionEfficiency || 0,
+        totalAbsorbedDrugs: existing.totalAbsorbedDrugs || 0,
+        attempts: existing.attempts || 0
       };
     });
 
     updateBarGraph();
   }
 
-  // Render bar graph showing theory vs actual for each tissue
+  // Render binding affinity and cell kill rate as separate graphs
   function updateBarGraph() {
     if (!latestStats || latestStats.length === 0) {
-      barGraphContent.innerHTML = '<div style="color:#888;font-size:12px">Run a test to see results</div>';
+      affinityContent.innerHTML = '<div style="color:#888;font-size:12px">Configure tissues and ligands</div>';
+      killRateContent.innerHTML = '<div style="color:#888;font-size:12px">Run a test to see results</div>';
       return;
     }
 
-    let html = '';
+    // Binding Affinity — always rendered from theoretical scores
+    let affinityHtml = '';
     for (let stat of latestStats) {
-      const theoryPct = Math.min(100, Math.max(0, stat.theoreticalScore || 0));
-      const actualPct = Math.min(100, Math.max(0, stat.bindingPercentage || 0));
-
-      html += `
+      const pct = Math.min(100, Math.max(0, stat.theoreticalScore || 0));
+      affinityHtml += `
         <div class="tissue-bar-row">
           <div class="tissue-bar-label">${stat.name}</div>
           <div class="tissue-bar-container">
             <div class="bar-wrapper">
               <div class="bar-bg">
-                <div class="bar-fill bar-theory" style="width:${theoryPct}%"></div>
+                <div class="bar-fill bar-theory" style="width:${pct}%"></div>
               </div>
-              <div class="bar-value">${theoryPct.toFixed(1)}%</div>
-            </div>
-            <div class="bar-wrapper">
-              <div class="bar-bg">
-                <div class="bar-fill bar-actual" style="width:${actualPct}%"></div>
-              </div>
-              <div class="bar-value">${actualPct.toFixed(1)}%</div>
+              <div class="bar-value">${pct.toFixed(1)}%</div>
             </div>
           </div>
         </div>
       `;
     }
+    affinityContent.innerHTML = affinityHtml;
 
-    barGraphContent.innerHTML = html;
+    // Cell Kill Rate — only shown after a test has produced actual data
+    const hasActualData = latestStats.some(s => (s.absorptionEfficiency || 0) > 0 || (s.totalAbsorbedDrugs || 0) > 0);
+    if (!hasActualData) {
+      killRateContent.innerHTML = '<div style="color:#888;font-size:12px">Run a test to see results</div>';
+      return;
+    }
+
+    let killHtml = '';
+    for (let stat of latestStats) {
+      const pct = Math.min(100, Math.max(0, stat.absorptionEfficiency || 0));
+      const absorbed = stat.totalAbsorbedDrugs || 0;
+      const subtitle = absorbed > 0 ? `${absorbed} absorbed` : '';
+      killHtml += `
+        <div class="tissue-bar-row">
+          <div class="tissue-bar-label">${stat.name}</div>
+          <div class="tissue-bar-container">
+            <div class="bar-wrapper">
+              <div class="bar-bg">
+                <div class="bar-fill bar-actual" style="width:${pct}%"></div>
+              </div>
+              <div class="bar-value">${pct.toFixed(1)}%</div>
+            </div>
+            ${subtitle ? `<div style="font-size:10px;color:#888;margin-top:2px">${subtitle}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+    killRateContent.innerHTML = killHtml;
   }
 
   function sendParams(command){
@@ -180,6 +206,7 @@
       toxicity: toxicity,
       turbulenceX: turbulenceX,
       turbulenceY: turbulenceY,
+      deathThreshold: deathThreshold,
       command: command || null,
       puzzle: window.currentPuzzle || null
     };
@@ -209,7 +236,7 @@
       window.currentPuzzle = puzzleObj;
     }
     tissueControlsDiv.innerHTML = '';
-    puzzleObj.tissues.forEach((t, ti)=>{
+    puzzleObj.tissues.forEach((t)=>{
       const wrapper = document.createElement('div'); wrapper.style.border='1px solid #ddd'; wrapper.style.padding='6px'; wrapper.style.marginBottom='6px';
 
       // Title row with tissue name and randomize button
@@ -284,6 +311,13 @@
     debouncedSendParams();
   };
 
+  // Cell death threshold slider
+  deathThresholdEl.oninput = () => {
+    deathThreshold = parseInt(deathThresholdEl.value);
+    deathThresholdLabel.textContent = deathThreshold;
+    debouncedSendParams();
+  };
+
   loadBtn.onclick = ()=>{
     fetch('puzzle_example.json').then(r=>r.json()).then(p=>{
       window.currentPuzzle = p; puzzleView.textContent = JSON.stringify(p, null, 2);
@@ -308,8 +342,8 @@
       ligandRow.children[i].value = -1;
     }
     drawPreview();
-    // Reset actual percentages in bar graph
-    latestStats = latestStats.map(s => ({...s, bindingPercentage: 0, bound: 0}));
+    // Reset actual scores in bar graph
+    latestStats = latestStats.map(s => ({...s, absorptionEfficiency: 0, totalAbsorbedDrugs: 0, attempts: 0}));
     updateBarGraph();
     sendParams('reset');
   };

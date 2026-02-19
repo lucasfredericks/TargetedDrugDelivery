@@ -12,6 +12,8 @@ class Debris {
     this.angle = angle;
     this.angVel = (Math.random() - 0.5) * 0.08;
     this.colorIndex = colorIndex;  // Ligand color (0-5)
+    this.age = 0;                  // Frames since spawn
+    this.lifetime = 180;           // 3 seconds at 60fps
   }
 
   // Create debris pieces from a bound particle's ligand positions
@@ -42,8 +44,22 @@ class Debris {
     return debris;
   }
 
+  // Whether this debris has expired
+  isExpired() {
+    return this.age >= this.lifetime;
+  }
+
+  // Current opacity (0-255), fading over lifetime
+  getAlpha() {
+    const fadeStart = 0.4; // start fading at 40% of lifetime
+    const progress = this.age / this.lifetime;
+    if (progress < fadeStart) return 255;
+    return Math.round(255 * (1 - (progress - fadeStart) / (1 - fadeStart)));
+  }
+
   // Update physics (same as a free particle but no binding)
   update(physicsParams, renderW, renderH, frameCount, fluidSim, cells) {
+    this.age++;
     this.x += this.vx;
     this.y += this.vy;
     this.angle += this.angVel;
@@ -121,10 +137,12 @@ class Debris {
     );
   }
 
-  // Render a single ligand triangle
+  // Render a single ligand triangle (with fade)
   render(g, spriteSize) {
+    const alpha = this.getAlpha();
+    if (alpha <= 0) return;
+
     const hexR = spriteSize * 0.35;
-    const apothem = hexR * Math.cos(Math.PI / 6);
     const triH = hexR * 0.7;
     const triS = (2 * triH) / Math.sqrt(3);
     const halfBase = triS / 2;
@@ -137,8 +155,9 @@ class Debris {
     const tipY = -triH * 0.5;
     const baseY = triH * 0.5;
 
+    const col = colorForIndex(this.colorIndex);
     g.noStroke();
-    g.fill(colorForIndex(this.colorIndex));
+    g.fill(g.red(col), g.green(col), g.blue(col), alpha);
     g.triangle(0, tipY, -halfBase, baseY, halfBase, baseY);
     g.pop();
   }

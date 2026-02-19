@@ -11,7 +11,8 @@ let scoreboardDiv = null;
 let globalParams = {
   ligandPositions: [-1, -1, -1, -1, -1, -1],
   toxicity: 2,
-  fidelity: 0.8
+  fidelity: 0.8,
+  deathThreshold: 5
 };
 
 // Display areas for each simulation (set in setup)
@@ -90,6 +91,7 @@ function createSimulations() {
       ligandPositions: globalParams.ligandPositions,
       toxicity: globalParams.toxicity,
       fidelity: globalParams.fidelity,
+      deathThreshold: globalParams.deathThreshold,
       width: width,
       height: height,
       useFluidSim: useFluidSim,
@@ -110,6 +112,7 @@ function createSimulations() {
         ligandPositions: globalParams.ligandPositions,
         toxicity: globalParams.toxicity,
         fidelity: globalParams.fidelity,
+        deathThreshold: globalParams.deathThreshold,
         width: RENDER_RESOLUTION.width,
         height: RENDER_RESOLUTION.height,
         useFluidSim: useFluidSim,
@@ -166,7 +169,7 @@ function drawTissueLabel(sim, area) {
 
   textSize(12);
   text(
-    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)`,
+    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Efficiency: ${stats.absorptionEfficiency.toFixed(1)}% (${stats.totalAbsorbedDrugs} absorbed)`,
     area.x + 8,
     area.y - 6
   );
@@ -185,7 +188,7 @@ function drawStatusBar() {
     const stats = sim.getStats();
     const testStatus = sim.getTestStatus();
     totalParticles += stats.particleCount;
-    boundParticles += stats.boundParticles;
+    boundParticles += stats.absorbingParticles + stats.absorbedParticles;
     freeParticles += stats.freeParticles;
 
     if (testStatus.testMode) {
@@ -245,7 +248,7 @@ function drawSingleTissueInfo() {
 
   textSize(14);
   text(
-    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} particles bound)`,
+    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Efficiency: ${stats.absorptionEfficiency.toFixed(1)}% (${stats.totalAbsorbedDrugs} absorbed)`,
     width / 2,
     boxY + 32
   );
@@ -291,6 +294,9 @@ function setupBroadcastChannel() {
         if (typeof msg.turbulenceY === 'number') {
           globalParams.turbulenceY = msg.turbulenceY;
         }
+        if (typeof msg.deathThreshold === 'number') {
+          globalParams.deathThreshold = msg.deathThreshold;
+        }
 
         // Propagate to all simulations
         for (let sim of simulations) {
@@ -302,6 +308,7 @@ function setupBroadcastChannel() {
           if (typeof globalParams.turbulenceY === 'number') {
             sim.physicsParams.turbulenceY = globalParams.turbulenceY;
           }
+          sim.setDeathThreshold(globalParams.deathThreshold);
         }
 
         // Handle commands
@@ -329,8 +336,9 @@ function broadcastStats() {
     return {
       name: sim.tissue.name,
       theoreticalScore: s.theoreticalScore,
-      bindingPercentage: s.bindingPercentage,
-      bound: s.bound
+      absorptionEfficiency: s.absorptionEfficiency,
+      totalAbsorbedDrugs: s.totalAbsorbedDrugs,
+      attempts: s.attempts
     };
   });
 
@@ -399,7 +407,7 @@ function updateScoreboard() {
     const stats = sim.getStats();
     const tissue = sim.tissue;
 
-    html += `<div class="tissue"><strong>${tissue.name}</strong><br>Theory: ${stats.theoreticalScore.toFixed(1)}%<br>Actual: ${stats.bindingPercentage.toFixed(1)}% (${stats.bound} bound)</div>`;
+    html += `<div class="tissue"><strong>${tissue.name}</strong><br>Theory: ${stats.theoreticalScore.toFixed(1)}%<br>Efficiency: ${stats.absorptionEfficiency.toFixed(1)}% (${stats.totalAbsorbedDrugs} absorbed)</div>`;
   }
 
   scoreboardDiv.innerHTML = html;

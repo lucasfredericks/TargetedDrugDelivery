@@ -8,6 +8,14 @@ class Cell {
     this.receptors = [];    // Array of Receptor objects
     this.receptorNodes = []; // Array of {angle, x, y, pairId} - nodes between adjacent receptors
     this.bound = 0;         // Count of bound particles on this cell
+    this.absorbedDrugs = 0; // Count of drug molecules absorbed into this cell
+
+    // Cell death state
+    this.dying = false;
+    this.dead = false;
+    this.deathTimer = 0;
+    this.deathDuration = 180; // 3 seconds at 60fps
+    this.deathSegments = [];  // Membrane line segments flying apart
 
     // Store receptor concentrations
     this.receptorConcentrations = receptorConcentrations || [0, 0, 0, 0, 0, 0];
@@ -178,8 +186,90 @@ class Cell {
     return `${color1}-${color2}`;
   }
 
+  // Update per-frame state (refractory timers, node availability, death animation)
+  update(physicsParams, frameCount) {
+    // Animate dying segments; skip receptor logic once death starts
+    if (this.dying) {
+      this.deathTimer++;
+      const noiseScale = physicsParams.turbulenceScale;
+      const noiseStr = physicsParams.turbulenceStrength * 0.15;
+      for (let seg of this.deathSegments) {
+        const mx = (seg.ax + seg.bx) * 0.5;
+        const my = (seg.ay + seg.by) * 0.5;
+        const nx = noise(mx * noiseScale + frameCount * 0.003 * physicsParams.turbulenceX, my * noiseScale);
+        const ny = noise(mx * noiseScale + 100, my * noiseScale + frameCount * 0.003 * physicsParams.turbulenceY);
+        seg.vx += (nx - 0.5) * 2 * noiseStr;
+        seg.vy += (ny - 0.5) * 2 * noiseStr;
+        seg.vx *= 0.97;
+        seg.vy *= 0.97;
+        seg.ax += seg.vx;
+        seg.ay += seg.vy;
+        seg.bx += seg.vx;
+        seg.by += seg.vy;
+      }
+      if (this.deathTimer >= this.deathDuration) {
+        this.dead = true;
+      }
+      return;
+    }
+
+    for (let receptor of this.receptors) {
+      receptor.updateRefractory();
+    }
+
+    // Reconcile receptor node bound states:
+    // A node becomes available again when neither of its receptors is bound, latched, or refractory
+    for (let node of this.receptorNodes) {
+      if (node.bound) {
+        const r1free = !node.receptor1.bound && !node.receptor1.latched && !node.receptor1.refractory;
+        const r2free = !node.receptor2.bound && !node.receptor2.latched && !node.receptor2.refractory;
+        if (r1free && r2free) {
+          node.bound = false;
+        }
+      }
+    }
+  }
+
+  // Trigger cell death: break membrane into flying segments
+  triggerDeath() {
+    this.dying = true;
+    this.deathTimer = 0;
+    this.deathSegments = [];
+    for (let i = 0; i < this.shape.length; i++) {
+      const a = this.shape[i];
+      const b = this.shape[(i + 1) % this.shape.length];
+      // Outward radial kick from cell center
+      const mx = (a.x + b.x) * 0.5;
+      const my = (a.y + b.y) * 0.5;
+      const radDx = mx - this.cx;
+      const radDy = my - this.cy;
+      const radLen = Math.sqrt(radDx * radDx + radDy * radDy) || 1;
+      const radialSpeed = (Math.random() * 1.5 + 0.5);
+      // Random scatter added to radial kick
+      const scatterAngle = Math.random() * Math.PI * 2;
+      const scatterSpeed = Math.random() * 0.8;
+      this.deathSegments.push({
+        ax: a.x, ay: a.y,
+        bx: b.x, by: b.y,
+        vx: (radDx / radLen) * radialSpeed + Math.cos(scatterAngle) * scatterSpeed,
+        vy: (radDy / radLen) * radialSpeed + Math.sin(scatterAngle) * scatterSpeed
+      });
+    }
+  }
+
+  // Returns true once the fade animation has fully completed
+  isFullyDead() {
+    return this.dead;
+  }
+
   // Render cell membrane and receptors to a graphics context
   render(g) {
+    if (this.dying) {
+      this.renderDying(g);
+      return;
+    }
+    if (this.dead) return;
+
     // Draw cell membrane outline with organic shape
     g.fill(220, 230, 240, 180);
     g.stroke(100, 100, 120, 120);
@@ -197,15 +287,26 @@ class Cell {
     }
   }
 
-  // Render binding percentage overlay (for test mode)
+  // Render membrane segments flying apart with fade
+  renderDying(g) {
+    const progress = this.deathTimer / this.deathDuration;
+    const alpha = Math.round(255 * (1 - progress));
+    g.stroke(100, 100, 120, alpha);
+    g.strokeWeight(2);
+    g.noFill();
+    for (let seg of this.deathSegments) {
+      g.line(seg.ax, seg.ay, seg.bx, seg.by);
+    }
+    g.noStroke();
+  }
+
+  // Render absorbed drug count overlay (for test mode)
   renderBindingOverlay(g, showOverlay) {
-    if (!showOverlay || this.receptors.length === 0) return;
+    if (!showOverlay || this.absorbedDrugs === 0 || this.dying || this.dead) return;
 
-    const boundReceptors = this.receptors.filter(r => r.bound).length;
-    const totalReceptors = this.receptors.length;
-    const percentage = (boundReceptors / totalReceptors * 100).toFixed(1);
+    const count = this.absorbedDrugs;
 
-    const boxW = 50;
+    const boxW = 36;
     const boxH = 24;
     g.fill(255, 255, 255, 220);
     g.stroke(0, 0, 0, 200);
@@ -218,7 +319,7 @@ class Cell {
     g.textSize(14);
     g.textAlign(CENTER, CENTER);
     g.textStyle(BOLD);
-    g.text(`${percentage}%`, this.cx, this.cy);
+    g.text(`${count}`, this.cx, this.cy);
     g.textStyle(NORMAL);
     g.rectMode(CORNER);
   }
@@ -246,12 +347,16 @@ class Cell {
   // Reset all receptor bound states
   resetBindings() {
     this.bound = 0;
+    this.absorbedDrugs = 0;
     for (let receptor of this.receptors) {
       receptor.bound = false;
       receptor.latched = false;
       receptor.latchedLigandColor = -1;
       receptor.latchedLigandX = 0;
       receptor.latchedLigandY = 0;
+      receptor.refractory = false;
+      receptor.refractoryTimer = 0;
+      receptor.refractoryColor = -1;
     }
     // Reset receptor node bound states
     for (let node of this.receptorNodes) {

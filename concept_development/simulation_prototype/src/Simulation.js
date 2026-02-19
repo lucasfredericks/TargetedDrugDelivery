@@ -59,9 +59,15 @@ class Simulation {
     this.testStartFrame = 0;
     this.testDuration = PHYSICS_DEFAULTS.testDuration;
 
+    // Cell death threshold (drugs absorbed before a cell dies)
+    this.deathThreshold = config.deathThreshold !== undefined ? config.deathThreshold : 5;
+
     // Statistics
     this.bound = 0;
     this.attempts = 0;
+    this.totalAbsorbed = 0;    // Running count — survives cell death/removal
+    this.initialCellCount = 0; // Cell count at test start, used as denominator
+    this.theoreticalScore = 0; // Snapshotted at test start; stable for the duration of the test
   }
 
   /**
@@ -118,18 +124,18 @@ class Simulation {
     this.minCellRadius = Math.min(this.width, this.height) * 0.08;
     this.maxCellRadius = Math.min(this.width, this.height) * 0.12;
 
-    // Minimum padding = 2x nanoparticle diameter
+    // Minimum padding — kept small since cell death removes blocked cells over time
     const nanoparticleDiameter = this.physicsParams.particleSpriteSize;
-    this.minCellPadding = nanoparticleDiameter * 2;
+    this.minCellPadding = nanoparticleDiameter * 1.0;
 
-    const maxAttempts = 200;
+    const maxAttempts = 400;
 
     // Calculate max possible radius (for margin calculation)
     // This accounts for expression scaling: maxCellRadius * maxSizeFactor
     const maxPossibleRadius = this.maxCellRadius * (EXPRESSION_SCALING?.maxSizeFactor || 1.2);
 
     // Calculate number of cells to fill screen space
-    const targetCoverage = 1.0;
+    const targetCoverage = 2.0; // Dense packing; cell death opens up new paths over time
     const screenArea = this.width * this.height;
     const avgBaseRadius = (this.minCellRadius + this.maxCellRadius) / 2;
     // Account for average expression scaling (assume ~50% expression on average)
@@ -140,7 +146,7 @@ class Simulation {
     const avgCellFootprint = Math.PI * effectiveRadius * effectiveRadius;
     const targetCellCount = Math.floor((targetCoverage * screenArea) / avgCellFootprint);
     // Clamp to reasonable range
-    const cellCount = Math.max(5, Math.min(50, targetCellCount));
+    const cellCount = Math.max(5, Math.min(80, targetCellCount));
 
     for (let i = 0; i < cellCount; i++) {
       let placed = false;
@@ -216,6 +222,13 @@ class Simulation {
       this.fluidSim.step(frameCount);
     }
 
+    // Update cell refractory timers and death animation
+    for (let cell of this.cells) {
+      cell.update(this.physicsParams, frameCount);
+    }
+    // Remove cells whose death animation has fully completed
+    this.cells = this.cells.filter(c => !c.isFullyDead());
+
     // Update particle physics
     this.updateParticles(frameCount);
 
@@ -258,7 +271,7 @@ class Simulation {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
 
-      if (p.bound) continue;
+      if (p.bound || p.fading) continue;
 
       // Update particle physics (pass fluidSim for GPU-based advection if available)
       p.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim);
@@ -269,8 +282,9 @@ class Simulation {
         continue;
       }
 
-      // Check collision with cells
-      const nearestCell = findNearestCollidingCell(p, this.cells, spriteRadius);
+      // Check collision with live cells only (skip dying/dead)
+      const liveCells = this.cells.filter(c => !c.dying && !c.dead);
+      const nearestCell = findNearestCollidingCell(p, liveCells, spriteRadius);
 
       if (nearestCell) {
         this.attempts++;
@@ -284,7 +298,8 @@ class Simulation {
         );
 
         if (result.success) {
-          // Mark receptors as bound/latched (visual update)
+          // Mark receptors as bound/latched (visual update) and collect them
+          const boundReceptors = [];
           for (let j = 0; j < result.matchedCellNodes.length; j++) {
             const cellNode = result.matchedCellNodes[j];
             const particleNode = result.matchedParticleNodes[j];
@@ -292,9 +307,11 @@ class Simulation {
             cellNode.receptor1.bound = true;
             cellNode.receptor1.latched = true;
             cellNode.receptor1.latchedLigandColor = particleNode.color1;
+            boundReceptors.push(cellNode.receptor1);
             cellNode.receptor2.bound = true;
             cellNode.receptor2.latched = true;
             cellNode.receptor2.latchedLigandColor = particleNode.color2;
+            boundReceptors.push(cellNode.receptor2);
           }
 
           // Spawn debris from the ligands before absorption
@@ -302,7 +319,7 @@ class Simulation {
           this.debris.push(...newDebris);
 
           // Start drug absorption toward cell center
-          p.startAbsorption(nearestCell);
+          p.startAbsorption(nearestCell, boundReceptors);
           this.bound++;
           nearestCell.bound += result.matchCount;
         } else {
@@ -314,14 +331,37 @@ class Simulation {
   }
 
   /**
-   * Update particles that are absorbing or absorbed
+   * Update particles that are absorbing, absorbed, or fading out
    */
   updateAbsorbingParticles(frameCount) {
     for (let p of this.particles) {
       if (p.absorbing || p.absorbed) {
+        const wasAbsorbing = p.absorbing;
         p.updateAbsorption(this.physicsParams, frameCount);
+        // Detect the frame a particle crosses the membrane and count it
+        if (wasAbsorbing && p.absorbed) {
+          this.totalAbsorbed++;
+        }
+      } else if (p.fading) {
+        p.updateFading(this.physicsParams, frameCount);
       }
     }
+
+    // Check death threshold: trigger cell death when absorbed drug count is reached
+    for (let cell of this.cells) {
+      if (!cell.dying && !cell.dead && cell.absorbedDrugs >= this.deathThreshold) {
+        cell.triggerDeath();
+        // Release all absorbed/absorbing particles in that cell to fade out
+        for (let p of this.particles) {
+          if ((p.absorbed || p.absorbing) && p.targetCell === cell) {
+            p.startFading();
+          }
+        }
+      }
+    }
+
+    // Remove particles whose fade animation has completed
+    this.particles = this.particles.filter(p => !p.isFadeExpired());
   }
 
   /**
@@ -332,7 +372,7 @@ class Simulation {
       const d = this.debris[i];
       d.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim, this.cells);
 
-      if (d.isOutOfBounds(this.width, this.height)) {
+      if (d.isOutOfBounds(this.width, this.height) || d.isExpired()) {
         this.debris.splice(i, 1);
       }
     }
@@ -418,6 +458,7 @@ class Simulation {
   setLigandPositions(positions) {
     this.ligandPositions = positions.slice(0, 6);
     this.regenerateSprite();
+    this.theoreticalScore = this.computeTheoreticalScore();
   }
 
   /**
@@ -436,6 +477,14 @@ class Simulation {
   }
 
   /**
+   * Update cell death threshold
+   */
+  setDeathThreshold(threshold) {
+    this.deathThreshold = threshold;
+    this.theoreticalScore = this.computeTheoreticalScore();
+  }
+
+  /**
    * Update tissue configuration (regenerates cells if receptors changed)
    */
   setTissue(tissue) {
@@ -449,6 +498,39 @@ class Simulation {
       // Cell count adjusts based on expression level (larger cells = fewer cells)
       this.generateCells();
     }
+    this.theoreticalScore = this.computeTheoreticalScore();
+  }
+
+  /**
+   * Compute theoretical score analytically from receptor concentrations and ligand positions.
+   * Represents the binding affinity of the drug for this tissue — the probability that a
+   * random adjacent receptor pair on the cell membrane matches any active ligand pair.
+   *
+   * matchRate = Σ (r[c1]/totalConc) × (r[c2]/totalConc)  for each active ligand pair (c1, c2)
+   * theoreticalScore = matchRate × 100
+   *
+   * This ranges 0–100% where 100% means every receptor pair on the tissue is compatible
+   * with the drug. It is stable: depends only on tissue receptors and ligand positions,
+   * not on cell layout, deathThreshold, or particle count.
+   */
+  computeTheoreticalScore() {
+    const receptors = this.tissue.receptors;
+
+    const totalConc = receptors.reduce((sum, r) => sum + (r || 0), 0);
+    if (totalConc < 0.01) return 0;
+
+    // Sum match probabilities over all active ligand ordered pairs
+    let matchRate = 0;
+    for (let i = 0; i < 6; i++) {
+      const c1 = this.ligandPositions[(i + 5) % 6];
+      const c2 = this.ligandPositions[i];
+      if (typeof c1 === 'number' && c1 >= 0 && c1 < 6 &&
+          typeof c2 === 'number' && c2 >= 0 && c2 < 6) {
+        matchRate += ((receptors[c1] || 0) / totalConc) * ((receptors[c2] || 0) / totalConc);
+      }
+    }
+
+    return Math.min(100, matchRate * 100);
   }
 
   // --- Test Mode Control ---
@@ -463,15 +545,15 @@ class Simulation {
     this.testStartFrame = frameCount;
     this.testDuration = duration || PHYSICS_DEFAULTS.testDuration;
 
-    // Clear particles, debris, and reset binding states
+    // Clear particles and debris, then regenerate cells fresh
     this.particles = [];
     this.debris = [];
     this.bound = 0;
     this.attempts = 0;
-
-    for (let cell of this.cells) {
-      cell.resetBindings();
-    }
+    this.totalAbsorbed = 0;
+    this.generateCells();
+    this.initialCellCount = this.cells.length;
+    this.theoreticalScore = this.computeTheoreticalScore();
   }
 
   /**
@@ -491,10 +573,10 @@ class Simulation {
     this.testParticlesReleased = 0;
     this.bound = 0;
     this.attempts = 0;
-
-    for (let cell of this.cells) {
-      cell.resetBindings();
-    }
+    this.totalAbsorbed = 0;
+    this.generateCells();
+    this.initialCellCount = this.cells.length;
+    this.theoreticalScore = this.computeTheoreticalScore();
   }
 
   // --- Statistics ---
@@ -503,29 +585,28 @@ class Simulation {
    * Get simulation statistics
    */
   getStats() {
-    let totalReceptors = 0;
-    let boundReceptors = 0;
+    const totalAbsorbedDrugs = this.totalAbsorbed;
 
-    for (let cell of this.cells) {
-      totalReceptors += cell.getTotalReceptors();
-      boundReceptors += cell.getBoundCount();
-    }
+    // Score = drugs absorbed / total cell capacity (deathThreshold × initial cell count)
+    const totalCapacity = this.deathThreshold * this.initialCellCount;
+    const absorptionEfficiency = totalCapacity > 0
+      ? (totalAbsorbedDrugs / totalCapacity) * 100
+      : 0;
 
-    const bindingPercentage = totalReceptors > 0 ? (boundReceptors / totalReceptors * 100) : 0;
-    // Use node-based combinatorial probability model for theoretical scoring
-    // Binding probabilities: 85% for 2+ matches, 20% for 1 match
-    const theoreticalScore = scoreTissue(this.ligandPositions, this.tissue.receptors);
+    // Theoretical score is snapshotted at test start (or when ligands change outside a test)
+    // so it stays stable while cells die during the run.
+    const theoreticalScore = this.theoreticalScore;
 
     return {
       bound: this.bound,
       attempts: this.attempts,
-      totalReceptors: totalReceptors,
-      boundReceptors: boundReceptors,
-      bindingPercentage: bindingPercentage,
+      totalAbsorbedDrugs: totalAbsorbedDrugs,
+      absorptionEfficiency: absorptionEfficiency,
       theoreticalScore: theoreticalScore,
       particleCount: this.particles.length,
       freeParticles: this.particles.filter(p => !p.bound).length,
-      boundParticles: this.particles.filter(p => p.bound).length
+      absorbingParticles: this.particles.filter(p => p.absorbing).length,
+      absorbedParticles: this.particles.filter(p => p.absorbed).length
     };
   }
 

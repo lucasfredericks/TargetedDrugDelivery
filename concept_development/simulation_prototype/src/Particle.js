@@ -16,6 +16,11 @@ class Particle {
     this.absorbed = false;    // Drug is inside the cell, drifting gently
     this.targetCell = null;   // Cell being absorbed into
     this.absorbTimer = 0;     // Frames since absorption started
+
+    // Fade-out state (released when host cell dies)
+    this.fading = false;
+    this.fadeTimer = 0;
+    this.fadeDuration = 30;   // 0.5 seconds at 60fps
   }
 
   // Create a particle spawned at the left edge of a tissue area
@@ -270,13 +275,14 @@ class Particle {
   }
 
   // Begin absorption: drug hexagon accelerates toward cell center
-  startAbsorption(cell) {
+  startAbsorption(cell, boundReceptors) {
     this.absorbing = true;
     this.absorbed = false;
     this.bound = true; // keep it flagged as bound so normal physics skip it
     this.targetCell = cell;
     this.absorbTimer = 0;
     this.angVel = 0;
+    this.boundReceptorList = boundReceptors || []; // receptors to put into refractory
   }
 
   // Update absorption physics each frame
@@ -298,6 +304,13 @@ class Particle {
         // Dampen entry speed but keep direction
         this.vx *= 0.4;
         this.vy *= 0.4;
+        // Increment the cell's absorbed drug counter
+        this.targetCell.absorbedDrugs++;
+        // Trigger refractory period on the receptors that captured this drug
+        for (let r of this.boundReceptorList) {
+          r.startRefractory();
+        }
+        this.boundReceptorList = [];
         return;
       }
 
@@ -369,6 +382,40 @@ class Particle {
     }
   }
 
+  // Release particle from its cell and begin fade-out (called when host cell dies)
+  startFading() {
+    this.fading = true;
+    this.fadeTimer = 0;
+    this.absorbing = false;
+    this.absorbed = false;
+    this.bound = false;
+    this.targetCell = null;
+    this.boundReceptorList = [];
+    // Give a small random scatter kick so they don't all sit in the same spot
+    const angle = Math.random() * Math.PI * 2;
+    this.vx += Math.cos(angle) * 0.5;
+    this.vy += Math.sin(angle) * 0.5;
+  }
+
+  // Update physics for a fading particle (turbulence drift, no cell interaction)
+  updateFading(physicsParams, frameCount) {
+    this.fadeTimer++;
+    const noiseScale = physicsParams.turbulenceScale * 2;
+    const noiseX = noise(this.x * noiseScale + 500, this.y * noiseScale + 500, frameCount * 0.005);
+    const noiseY = noise(this.x * noiseScale + 1500, this.y * noiseScale + 500, frameCount * 0.005);
+    this.vx += (noiseX - 0.5) * 2 * physicsParams.turbulenceStrength * 0.06;
+    this.vy += (noiseY - 0.5) * 2 * physicsParams.turbulenceStrength * 0.06;
+    this.vx *= 0.99;
+    this.vy *= 0.99;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.angle += 0.02;
+  }
+
+  isFadeExpired() {
+    return this.fading && this.fadeTimer >= this.fadeDuration;
+  }
+
   // Deflect particle around a cell
   deflectAroundCell(cell, spriteRadius, flowSpeed) {
     const dx = this.x - cell.cx;
@@ -397,6 +444,12 @@ class Particle {
 
   // Render particle to a graphics context
   render(g, sprite, spriteSize, toxicity) {
+    if (this.fading) {
+      const fadeAlpha = Math.round(255 * (1 - this.fadeTimer / this.fadeDuration));
+      this.renderDrugHexagon(g, spriteSize, toxicity, fadeAlpha);
+      return;
+    }
+
     if (this.absorbing || this.absorbed) {
       // Draw only the drug hexagon (no ligands)
       this.renderDrugHexagon(g, spriteSize, toxicity);
@@ -423,10 +476,10 @@ class Particle {
     }
   }
 
-  // Render just the drug hexagon (during/after absorption)
-  renderDrugHexagon(g, spriteSize, toxicity) {
+  // Render just the drug hexagon (during/after absorption, or while fading)
+  renderDrugHexagon(g, spriteSize, toxicity, alphaOverride) {
     const hexR = spriteSize * 0.35;
-    const alpha = this.absorbed ? 200 : 255;
+    const alpha = alphaOverride !== undefined ? alphaOverride : (this.absorbed ? 200 : 255);
 
     g.push();
     g.translate(this.x, this.y);
