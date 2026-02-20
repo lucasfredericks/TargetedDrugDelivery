@@ -48,6 +48,20 @@ const LAYOUT_DEFAULTS = {
   maxAreaWidth: 520
 };
 
+// Soft body spring-mass defaults for cell membranes
+const SOFT_BODY_DEFAULTS = {
+  structuralStiffness: 0.5,   // Spring constant between adjacent membrane nodes
+  structuralDamping: 0.1,    // Damping on structural springs
+  pressureStiffness: 0.25,    // Spring constant from nodes to cell center (volume preservation)
+  pressureDamping: 0.03,      // Damping on pressure springs
+  nodeDamping: 0.93,          // Per-frame velocity damping on nodes
+  fluidForceScale: 0.02,      // How strongly fluid velocity pushes membrane nodes
+  brownianStrength: 0.05,     // Random jitter force on nodes (biological micro-motion)
+  impactForceScale: 1.0,      // Force multiplier when a nanoparticle hits the membrane
+  anchorStiffness: 0.1,       // How strongly the cell center is tethered to its spawn point (0-1)
+  enabled: true
+};
+
 // Export for browser global
 window.COLORS = COLORS;
 window.COLOR_NAMES = COLOR_NAMES;
@@ -56,3 +70,4 @@ window.PHYSICS_DEFAULTS = PHYSICS_DEFAULTS;
 window.EXPRESSION_SCALING = EXPRESSION_SCALING;
 window.RENDER_RESOLUTION = RENDER_RESOLUTION;
 window.LAYOUT_DEFAULTS = LAYOUT_DEFAULTS;
+window.SOFT_BODY_DEFAULTS = SOFT_BODY_DEFAULTS;

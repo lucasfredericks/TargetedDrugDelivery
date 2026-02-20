@@ -44,6 +44,9 @@ class Cell {
 
     // Auto-allocate receptors based on concentrations
     this.allocateReceptors();
+
+    // Initialize soft body spring-mass system
+    this.initSoftBody();
   }
 
   // Generate organic cell shape using Perlin noise
@@ -120,12 +123,208 @@ class Cell {
         const tipX = baseX + nx * stemLen;
         const tipY = baseY + ny * stemLen;
 
-        this.receptors.push(new Receptor(baseX, baseY, tipX, tipY, color, nx, ny, branchLen));
+        const receptor = new Receptor(baseX, baseY, tipX, tipY, color, nx, ny, branchLen);
+        receptor.shapeIndex = shapeIdx; // Track which shape point this receptor is anchored to
+        this.receptors.push(receptor);
       }
     }
 
     // Compute receptor nodes between adjacent receptors
     this.computeReceptorNodes();
+  }
+
+  // Initialize soft body spring-mass system from current shape points
+  initSoftBody() {
+    const sb = SOFT_BODY_DEFAULTS;
+    this.softBodyEnabled = sb.enabled;
+
+    // Store the anchored center — cell never drifts from this position
+    this.anchorX = this.cx;
+    this.anchorY = this.cy;
+
+    if (!this.softBodyEnabled || !this.shape || this.shape.length === 0) {
+      this.nodes = [];
+      this.structuralSprings = [];
+      return;
+    }
+
+    // Create mass nodes from shape points
+    // Rest offsets are relative to cell center so they move with the cell
+    this.nodes = this.shape.map(pt => ({
+      x: pt.x,
+      y: pt.y,
+      vx: 0,
+      vy: 0,
+      restOffsetX: pt.x - this.cx,
+      restOffsetY: pt.y - this.cy,
+      mass: 1.0
+    }));
+
+    // Structural springs between adjacent nodes (membrane shape preservation)
+    this.structuralSprings = [];
+    for (let i = 0; i < this.nodes.length; i++) {
+      const j = (i + 1) % this.nodes.length;
+      const ni = this.nodes[i];
+      const nj = this.nodes[j];
+      const dx = nj.x - ni.x;
+      const dy = nj.y - ni.y;
+      this.structuralSprings.push({
+        i: i,
+        j: j,
+        restLength: Math.sqrt(dx * dx + dy * dy),
+        stiffness: sb.structuralStiffness,
+        damping: sb.structuralDamping
+      });
+    }
+  }
+
+  // Update soft body physics each frame
+  updateSoftBody(physicsParams, frameCount, fluidSim) {
+    if (!this.softBodyEnabled || this.nodes.length === 0) return;
+
+    const sb = SOFT_BODY_DEFAULTS;
+
+    // 1. Apply external forces to nodes (small — just for subtle jiggle)
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i];
+
+      // Brownian jitter only (keeps cells alive-looking without drift)
+      node.vx += (Math.random() - 0.5) * sb.brownianStrength;
+      node.vy += (Math.random() - 0.5) * sb.brownianStrength;
+    }
+
+    // 2. Apply structural spring forces (adjacent membrane nodes)
+    for (let spring of this.structuralSprings) {
+      const ni = this.nodes[spring.i];
+      const nj = this.nodes[spring.j];
+      const dx = nj.x - ni.x;
+      const dy = nj.y - ni.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+      const displacement = dist - spring.restLength;
+
+      const fx = (dx / dist) * displacement * spring.stiffness;
+      const fy = (dy / dist) * displacement * spring.stiffness;
+
+      const dvx = nj.vx - ni.vx;
+      const dvy = nj.vy - ni.vy;
+      const dampFx = dvx * spring.damping;
+      const dampFy = dvy * spring.damping;
+
+      ni.vx += (fx + dampFx) / ni.mass;
+      ni.vy += (fy + dampFy) / ni.mass;
+      nj.vx -= (fx + dampFx) / nj.mass;
+      nj.vy -= (fy + dampFy) / nj.mass;
+    }
+
+    // 3. Shape-restoring springs — pull each node toward its rest shape relative to current center
+    // Because rest offsets are relative, the whole cell can translate freely;
+    // only local deformation is resisted by these springs.
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i];
+      const targetX = this.cx + node.restOffsetX;
+      const targetY = this.cy + node.restOffsetY;
+      const dx = node.x - targetX;
+      const dy = node.y - targetY;
+
+      node.vx -= dx * sb.pressureStiffness;
+      node.vy -= dy * sb.pressureStiffness;
+      node.vx -= node.vx * sb.pressureDamping;
+      node.vy -= node.vy * sb.pressureDamping;
+    }
+
+    // 4. Integrate positions and apply damping
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i];
+      node.vx *= sb.nodeDamping;
+      node.vy *= sb.nodeDamping;
+      node.x += node.vx;
+      node.y += node.vy;
+
+      // Update corresponding shape point
+      this.shape[i].x = node.x;
+      this.shape[i].y = node.y;
+    }
+
+    // 5. Compute centroid from nodes
+    let sumX = 0, sumY = 0;
+    for (let node of this.nodes) {
+      sumX += node.x;
+      sumY += node.y;
+    }
+    this.cx = sumX / this.nodes.length;
+    this.cy = sumY / this.nodes.length;
+
+    // 6. Anchor spring — pull cell center back toward spawn point (prevents drift)
+    // This is a force on the whole cell, distributed to all nodes
+    const anchorDx = this.cx - this.anchorX;
+    const anchorDy = this.cy - this.anchorY;
+    const pullX = anchorDx * sb.anchorStiffness;
+    const pullY = anchorDy * sb.anchorStiffness;
+    for (let node of this.nodes) {
+      node.vx -= pullX;
+      node.vy -= pullY;
+    }
+
+    // 7. Update receptor positions to follow their anchored shape points
+    this.updateReceptorPositions();
+  }
+
+  // Reposition receptors to follow deformed membrane
+  updateReceptorPositions() {
+    for (let receptor of this.receptors) {
+      if (receptor.shapeIndex === undefined) continue;
+
+      const pt = this.shape[receptor.shapeIndex];
+      const dx = pt.x - this.cx;
+      const dy = pt.y - this.cy;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      // Update receptor base (on membrane) and tip (outward)
+      receptor.baseX = pt.x;
+      receptor.baseY = pt.y;
+      receptor.nx = nx;
+      receptor.ny = ny;
+
+      const branchLen = receptor.branchLen;
+      const stemLen = branchLen * 2;
+      receptor.tipX = pt.x + nx * stemLen;
+      receptor.tipY = pt.y + ny * stemLen;
+    }
+  }
+
+  // Apply an impulse force at a point on the membrane (e.g., particle impact)
+  applyImpulse(x, y, fx, fy) {
+    if (!this.softBodyEnabled || this.nodes.length === 0) return;
+
+    // Find nearest node to impact point
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+    for (let i = 0; i < this.nodes.length; i++) {
+      const dx = this.nodes[i].x - x;
+      const dy = this.nodes[i].y - y;
+      const d = dx * dx + dy * dy;
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestIdx = i;
+      }
+    }
+
+    const scale = SOFT_BODY_DEFAULTS.impactForceScale;
+
+    // Apply force to nearest node and its neighbors (spread impact)
+    const n = this.nodes.length;
+    this.nodes[nearestIdx].vx += fx * scale;
+    this.nodes[nearestIdx].vy += fy * scale;
+
+    // Neighbors get half the force
+    const prev = (nearestIdx - 1 + n) % n;
+    const next = (nearestIdx + 1) % n;
+    this.nodes[prev].vx += fx * scale * 0.5;
+    this.nodes[prev].vy += fy * scale * 0.5;
+    this.nodes[next].vx += fx * scale * 0.5;
+    this.nodes[next].vy += fy * scale * 0.5;
   }
 
   /**
@@ -186,8 +385,8 @@ class Cell {
     return `${color1}-${color2}`;
   }
 
-  // Update per-frame state (refractory timers, node availability, death animation)
-  update(physicsParams, frameCount) {
+  // Update per-frame state (soft body, refractory timers, node availability, death animation)
+  update(physicsParams, frameCount, fluidSim) {
     // Animate dying segments; skip receptor logic once death starts
     if (this.dying) {
       this.deathTimer++;
@@ -212,6 +411,9 @@ class Cell {
       }
       return;
     }
+
+    // Update soft body spring-mass dynamics
+    this.updateSoftBody(physicsParams, frameCount, fluidSim);
 
     for (let receptor of this.receptors) {
       receptor.updateRefractory();
@@ -395,6 +597,9 @@ class Cell {
     // Regenerate shape and receptors
     this.shape = Cell.generateShape(this.cx, this.cy, this.radius, this.seed, this.numShapePoints);
     this.allocateReceptors();
+
+    // Reinitialize soft body for new shape
+    this.initSoftBody();
   }
 }
 

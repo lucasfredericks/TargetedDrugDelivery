@@ -40,6 +40,8 @@ class Simulation {
     // Internal state
     this.particles = [];
     this.debris = [];  // Free-floating ligand debris from absorbed particles
+    this.tracers = []; // Lightweight flow-visualization particles
+    this.tracerCount = 3000; // Target number of tracer particles
     this.cells = [];
     this.buffer = null;
     this.particleSprite = null;
@@ -112,7 +114,24 @@ class Simulation {
       console.error('FluidSimulation class not found - check script loading order');
     }
 
+    // Spawn initial tracer particles spread across the canvas
+    this.initTracers();
+
     this.initialized = true;
+  }
+
+  /**
+   * Initialize tracer particles spread across the canvas
+   */
+  initTracers() {
+    this.tracers = [];
+    if (typeof TracerParticle === 'undefined') return;
+
+    for (let i = 0; i < this.tracerCount; i++) {
+      this.tracers.push(TracerParticle.spawnRandom(
+        this.width, this.height, this.physicsParams.flowSpeed
+      ));
+    }
   }
 
   /**
@@ -155,9 +174,9 @@ class Simulation {
       while (!placed && attemptCount < maxAttempts) {
         // Horizontal margin (left/right) - full margin for inflow/outflow
         const marginX = maxPossibleRadius + this.minCellPadding;
-        // Vertical margin (top/bottom) - reduced to allow cells closer to walls
-        // This creates more interesting flow patterns with the wall boundaries
-        const marginY = maxPossibleRadius * 0.5 + this.minCellPadding;
+        // Vertical margin (top/bottom) - keep 1.5× sprite clearance so nanoparticles
+        // can flow above and below cells rather than piling up at the walls
+        const marginY = maxPossibleRadius + nanoparticleDiameter * 1.5;
 
         const cx = Math.random() * (this.width - 2 * marginX) + marginX;
         const cy = Math.random() * (this.height - 2 * marginY) + marginY;
@@ -222,9 +241,12 @@ class Simulation {
       this.fluidSim.step(frameCount);
     }
 
-    // Update cell refractory timers and death animation
+    // Update tracer particles
+    this.updateTracers(frameCount);
+
+    // Update cell refractory timers, soft body dynamics, and death animation
     for (let cell of this.cells) {
-      cell.update(this.physicsParams, frameCount);
+      cell.update(this.physicsParams, frameCount, this.fluidSim);
     }
     // Remove cells whose death animation has fully completed
     this.cells = this.cells.filter(c => !c.isFullyDead());
@@ -323,8 +345,13 @@ class Simulation {
           this.bound++;
           nearestCell.bound += result.matchCount;
         } else {
-          // Deflect around cell
+          // Deflect around cell and apply impulse to membrane
+          const impactX = p.x;
+          const impactY = p.y;
+          const impactFx = p.vx * 0.3;
+          const impactFy = p.vy * 0.3;
           p.deflectAroundCell(nearestCell, spriteRadius, this.physicsParams.flowSpeed);
+          nearestCell.applyImpulse(impactX, impactY, impactFx, impactFy);
         }
       }
     }
@@ -379,6 +406,33 @@ class Simulation {
   }
 
   /**
+   * Update tracer particles (advection, recycling)
+   */
+  updateTracers(frameCount) {
+    if (typeof TracerParticle === 'undefined') return;
+
+    // Update existing tracers
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      t.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim);
+
+      // Recycle expired or out-of-bounds tracers
+      if (t.isExpired() || t.isOutOfBounds(this.width, this.height)) {
+        this.tracers[i] = TracerParticle.spawnLeft(
+          this.width, this.height, this.physicsParams.flowSpeed
+        );
+      }
+    }
+
+    // Top up if below target count
+    while (this.tracers.length < this.tracerCount) {
+      this.tracers.push(TracerParticle.spawnLeft(
+        this.width, this.height, this.physicsParams.flowSpeed
+      ));
+    }
+  }
+
+  /**
    * Render simulation to internal buffer
    */
   render() {
@@ -408,6 +462,9 @@ class Simulation {
         opacity: 160
       });
     }
+
+    // Render tracer particles (behind cells for depth)
+    this.renderTracers();
 
     // Render cells
     for (let cell of this.cells) {
@@ -440,6 +497,16 @@ class Simulation {
     for (let d of this.debris) {
       d.render(this.buffer, this.physicsParams.particleSpriteSize);
     }
+  }
+
+  /**
+   * Render tracer particles to buffer
+   */
+  renderTracers() {
+    for (let t of this.tracers) {
+      t.render(this.buffer);
+    }
+    this.buffer.noStroke();
   }
 
   /**
@@ -545,9 +612,10 @@ class Simulation {
     this.testStartFrame = frameCount;
     this.testDuration = duration || PHYSICS_DEFAULTS.testDuration;
 
-    // Clear particles and debris, then regenerate cells fresh
+    // Clear particles, debris, and tracers, then regenerate cells fresh
     this.particles = [];
     this.debris = [];
+    this.initTracers();
     this.bound = 0;
     this.attempts = 0;
     this.totalAbsorbed = 0;
@@ -569,6 +637,7 @@ class Simulation {
   reset() {
     this.particles = [];
     this.debris = [];
+    this.initTracers();
     this.testMode = false;
     this.testParticlesReleased = 0;
     this.bound = 0;

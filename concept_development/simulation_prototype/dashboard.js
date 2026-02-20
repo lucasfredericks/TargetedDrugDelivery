@@ -18,8 +18,6 @@
   const turbulenceXLabel = document.getElementById('turbulenceXLabel');
   const turbulenceYEl = document.getElementById('turbulenceY');
   const turbulenceYLabel = document.getElementById('turbulenceYLabel');
-  const deathThresholdEl = document.getElementById('deathThreshold');
-  const deathThresholdLabel = document.getElementById('deathThresholdLabel');
   const loadBtn = document.getElementById('loadPuzzle');
   const resetBtn = document.getElementById('resetSim');
   const testBtn = document.getElementById('testBtn');
@@ -35,7 +33,6 @@
   let particleCount = 1000;
   let turbulenceX = 0.1;
   let turbulenceY = 0.3;
-  let deathThreshold = 5;
 
   // Store latest stats from simulation for bar graph
   let latestStats = [];
@@ -206,7 +203,6 @@
       toxicity: toxicity,
       turbulenceX: turbulenceX,
       turbulenceY: turbulenceY,
-      deathThreshold: deathThreshold,
       command: command || null,
       puzzle: window.currentPuzzle || null
     };
@@ -217,7 +213,7 @@
   // create a default empty puzzle structure (4 tissues, 6 zeroed receptors)
   function defaultPuzzle(){
     const tissues = [];
-    for (let i=0;i<4;i++) tissues.push({ name: 'T'+(i+1), receptors: [0,0,0,0,0,0] });
+    for (let i=0;i<4;i++) tissues.push({ name: 'T'+(i+1), receptors: [0,0,0,0,0,0], deathThreshold: 5 });
     return { id: 'default', tissues: tissues, ligandCounts: [0,0,0,0,0,0], toxicity: toxicity };
   }
 
@@ -285,7 +281,25 @@
         sendParams(); // Send immediately on button click
       };
 
-      wrapper.appendChild(row); tissueControlsDiv.appendChild(wrapper);
+      wrapper.appendChild(row);
+
+      // Per-tissue death threshold slider
+      const dtRow = document.createElement('div'); dtRow.style.marginTop='6px'; dtRow.style.display='flex'; dtRow.style.alignItems='center'; dtRow.style.gap='6px';
+      const dtLabel = document.createElement('label'); dtLabel.style.fontSize='12px';
+      const dtVal = t.deathThreshold || 5;
+      dtLabel.textContent = `Cell death threshold: ${dtVal}`;
+      const dtInput = document.createElement('input'); dtInput.type='range'; dtInput.min=1; dtInput.max=10; dtInput.step=1; dtInput.value=dtVal; dtInput.style.width='120px';
+      dtInput.oninput = (e)=>{
+        const v = parseInt(e.target.value);
+        t.deathThreshold = v;
+        dtLabel.textContent = `Cell death threshold: ${v}`;
+        updatePuzzleView();
+        debouncedSendParams();
+      };
+      dtRow.appendChild(dtLabel); dtRow.appendChild(dtInput);
+      wrapper.appendChild(dtRow);
+
+      tissueControlsDiv.appendChild(wrapper);
     });
     updatePuzzleView();
     updateTheoreticalScores();
@@ -308,13 +322,6 @@
   turbulenceYEl.oninput = () => {
     turbulenceY = parseFloat(turbulenceYEl.value);
     turbulenceYLabel.textContent = turbulenceY.toFixed(2);
-    debouncedSendParams();
-  };
-
-  // Cell death threshold slider
-  deathThresholdEl.oninput = () => {
-    deathThreshold = parseInt(deathThresholdEl.value);
-    deathThresholdLabel.textContent = deathThreshold;
     debouncedSendParams();
   };
 

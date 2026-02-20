@@ -11,8 +11,7 @@ let scoreboardDiv = null;
 let globalParams = {
   ligandPositions: [-1, -1, -1, -1, -1, -1],
   toxicity: 2,
-  fidelity: 0.8,
-  deathThreshold: 5
+  fidelity: 0.8
 };
 
 // Display areas for each simulation (set in setup)
@@ -91,7 +90,7 @@ function createSimulations() {
       ligandPositions: globalParams.ligandPositions,
       toxicity: globalParams.toxicity,
       fidelity: globalParams.fidelity,
-      deathThreshold: globalParams.deathThreshold,
+      deathThreshold: tissue.deathThreshold || 5,
       width: width,
       height: height,
       useFluidSim: useFluidSim,
@@ -112,7 +111,7 @@ function createSimulations() {
         ligandPositions: globalParams.ligandPositions,
         toxicity: globalParams.toxicity,
         fidelity: globalParams.fidelity,
-        deathThreshold: globalParams.deathThreshold,
+        deathThreshold: tissue.deathThreshold || 5,
         width: RENDER_RESOLUTION.width,
         height: RENDER_RESOLUTION.height,
         useFluidSim: useFluidSim,
@@ -169,7 +168,7 @@ function drawTissueLabel(sim, area) {
 
   textSize(12);
   text(
-    `Theory: ${stats.theoreticalScore.toFixed(1)}% | Efficiency: ${stats.absorptionEfficiency.toFixed(1)}% (${stats.totalAbsorbedDrugs} absorbed)`,
+    `Binding Affinity: ${stats.theoreticalScore.toFixed(1)}% | Cell Death: ${stats.absorptionEfficiency.toFixed(1)}% (${stats.totalAbsorbedDrugs} absorbed)`,
     area.x + 8,
     area.y - 6
   );
@@ -294,10 +293,6 @@ function setupBroadcastChannel() {
         if (typeof msg.turbulenceY === 'number') {
           globalParams.turbulenceY = msg.turbulenceY;
         }
-        if (typeof msg.deathThreshold === 'number') {
-          globalParams.deathThreshold = msg.deathThreshold;
-        }
-
         // Propagate to all simulations
         for (let sim of simulations) {
           sim.setLigandPositions(globalParams.ligandPositions);
@@ -308,7 +303,11 @@ function setupBroadcastChannel() {
           if (typeof globalParams.turbulenceY === 'number') {
             sim.physicsParams.turbulenceY = globalParams.turbulenceY;
           }
-          sim.setDeathThreshold(globalParams.deathThreshold);
+          // Apply per-tissue death threshold from puzzle
+          const tissue = puzzle?.tissues?.[sim.tissueIndex];
+          if (tissue) {
+            sim.setDeathThreshold(tissue.deathThreshold || 5);
+          }
         }
 
         // Handle commands
