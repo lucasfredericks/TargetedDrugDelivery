@@ -1,0 +1,237 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0a0a1a;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    background: #111128;
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #2a2a4a;
+}
+
+header h1 {
+    font-size: 1.4em;
+    color: #8888ff;
+}
+
+.status-badge {
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-idle { background: #333; color: #999; }
+.status-nanoparticle_scanned { background: #2a4a2a; color: #6f6; }
+.status-puzzle_loaded { background: #2a3a5a; color: #6af; }
+.status-testing { background: #5a4a1a; color: #fd6; animation: pulse 1s infinite; }
+.status-results { background: #2a5a2a; color: #6f6; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 16px;
+    padding: 16px;
+    overflow: hidden;
+}
+
+/* Left panel: nanoparticle + puzzle info */
+.panel-left {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.card {
+    background: #141428;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.card h2 {
+    font-size: 1em;
+    color: #8888cc;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Nanoparticle preview */
+#nanoparticle-canvas {
+    display: block;
+    margin: 0 auto;
+}
+
+.ligand-list {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+}
+
+.ligand-slot {
+    text-align: center;
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    background: #1a1a30;
+}
+
+/* Puzzle info */
+.tissue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tissue-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background: #1a1a30;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+
+.tissue-name { font-weight: bold; }
+
+/* Right panel: results */
+.panel-right {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.results-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.result-card {
+    background: #141428;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.result-card h3 {
+    font-size: 1.1em;
+    margin-bottom: 8px;
+    color: #aaa;
+}
+
+.result-card .tissue-name-label {
+    font-size: 1.3em;
+    font-weight: bold;
+    margin-bottom: 12px;
+}
+
+.bar-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 12px;
+}
+
+.bar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bar-label {
+    font-size: 0.8em;
+    color: #888;
+    display: flex;
+    justify-content: space-between;
+}
+
+.bar-track {
+    height: 28px;
+    background: #1a1a30;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    font-size: 0.85em;
+    font-weight: bold;
+    min-width: 0;
+}
+
+.bar-fill.affinity { background: linear-gradient(90deg, #3366cc, #5588ee); }
+.bar-fill.killrate { background: linear-gradient(90deg, #cc3333, #ee5555); }
+
+/* Footer */
+footer {
+    background: #111128;
+    padding: 8px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8em;
+    color: #666;
+    border-top: 1px solid #2a2a4a;
+}
+
+.client-count { color: #8888cc; }
+
+/* Waiting state */
+.waiting-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 1.4em;
+    color: #555;
+}
+
+.error-toast {
+    position: fixed;
+    bottom: 60px;
+    right: 24px;
+    background: #441111;
+    color: #ff6666;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid #662222;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}

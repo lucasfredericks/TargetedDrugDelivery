@@ -20,6 +20,9 @@ let displayAreas = [];
 // Fluid simulation toggle (set via URL param ?fluid=true)
 let useFluidSim = false;
 
+// Network client for Pi master server or BroadcastChannel fallback
+let network = null;
+
 function setup() {
   // Detect single-tissue mode via URL param
   const tissueParam = parseInt(getQueryParam('tissue'));
@@ -38,8 +41,8 @@ function setup() {
   // Get scoreboard element
   scoreboardDiv = document.getElementById('scoreboard');
 
-  // Setup BroadcastChannel listener
-  setupBroadcastChannel();
+  // Setup network (Socket.IO if ?server= param, else BroadcastChannel)
+  setupNetwork();
 
   // Load puzzle and create simulations
   fetch('puzzle_example.json')
@@ -253,98 +256,124 @@ function drawSingleTissueInfo() {
   );
 }
 
-// Global channel reference for broadcasting stats
-let broadcastChannel = null;
+// Network setup: Socket.IO for exhibit mode (?server=host:port), BroadcastChannel for local dev
+function setupNetwork() {
+  network = new NetworkClient();
+  network.initialize();
 
-function setupBroadcastChannel() {
-  try {
-    broadcastChannel = new BroadcastChannel('tdd-channel');
-    console.log('Simulation: BroadcastChannel created');
+  // Handle test start (from Pi master or dashboard)
+  network.onStartTest((data) => {
+    console.log('Starting test mode');
 
-    broadcastChannel.onmessage = (ev) => {
-      const msg = ev.data || {};
-      console.log('Simulation received message:', msg.type, msg.command || '');
-
-      if (msg.type === 'test') {
-        // Start test mode on all simulations
-        console.log('Starting test mode with', msg.totalParticles, 'particles');
-        for (let sim of simulations) {
-          sim.startTest(msg.totalParticles || 1000, 600);
-        }
-        updateScoreboard();
-        broadcastStats();
-      } else if (msg.type === 'params') {
-        // Apply puzzle update first if provided (updates tissue receptors)
-        // but skip ligandCounts from puzzle - we'll use msg.ligandPositions instead
-        if (msg.puzzle) {
-          applyPuzzleWithoutLigands(msg.puzzle);
-        }
-
-        // Update global parameters from dashboard (takes precedence over puzzle)
-        if (Array.isArray(msg.ligandPositions)) {
-          globalParams.ligandPositions = msg.ligandPositions.slice(0, 6);
-        }
-        if (typeof msg.toxicity === 'number') {
-          globalParams.toxicity = msg.toxicity;
-        }
-        if (typeof msg.turbulenceX === 'number') {
-          globalParams.turbulenceX = msg.turbulenceX;
-        }
-        if (typeof msg.turbulenceY === 'number') {
-          globalParams.turbulenceY = msg.turbulenceY;
-        }
-        // Propagate to all simulations
+    // In exhibit mode, apply received config before starting
+    if (network.isExhibitMode && data) {
+      if (data.puzzle) {
+        applyPuzzle(data.puzzle);
+      }
+      if (Array.isArray(data.ligandPositions)) {
+        globalParams.ligandPositions = data.ligandPositions.slice(0, 6);
         for (let sim of simulations) {
           sim.setLigandPositions(globalParams.ligandPositions);
-          sim.setToxicity(globalParams.toxicity);
-          if (typeof globalParams.turbulenceX === 'number') {
-            sim.physicsParams.turbulenceX = globalParams.turbulenceX;
-          }
-          if (typeof globalParams.turbulenceY === 'number') {
-            sim.physicsParams.turbulenceY = globalParams.turbulenceY;
-          }
-          // Apply per-tissue death threshold from puzzle
-          const tissue = puzzle?.tissues?.[sim.tissueIndex];
-          if (tissue) {
-            sim.setDeathThreshold(tissue.deathThreshold || 5);
-          }
         }
-
-        // Handle commands
-        if (msg.command === 'reset' || msg.command === 'restart') {
-          for (let sim of simulations) {
-            sim.reset();
-          }
-        }
-
-        updateScoreboard();
-        broadcastStats();
       }
-    };
-  } catch (e) {
-    console.warn('BroadcastChannel not available');
-  }
+      if (typeof data.toxicity === 'number') {
+        globalParams.toxicity = data.toxicity;
+        for (let sim of simulations) {
+          sim.setToxicity(globalParams.toxicity);
+        }
+      }
+    }
+
+    for (let sim of simulations) {
+      sim.startTest(data?.totalParticles || 1000, 600);
+    }
+    updateScoreboard();
+    sendStats();
+  });
+
+  // Handle params update (BroadcastChannel / dashboard mode only)
+  network.onParams((msg) => {
+    console.log('Simulation received params:', msg.command || '');
+
+    if (msg.puzzle) {
+      applyPuzzleWithoutLigands(msg.puzzle);
+    }
+
+    if (Array.isArray(msg.ligandPositions)) {
+      globalParams.ligandPositions = msg.ligandPositions.slice(0, 6);
+    }
+    if (typeof msg.toxicity === 'number') {
+      globalParams.toxicity = msg.toxicity;
+    }
+    if (typeof msg.turbulenceX === 'number') {
+      globalParams.turbulenceX = msg.turbulenceX;
+    }
+    if (typeof msg.turbulenceY === 'number') {
+      globalParams.turbulenceY = msg.turbulenceY;
+    }
+
+    for (let sim of simulations) {
+      sim.setLigandPositions(globalParams.ligandPositions);
+      sim.setToxicity(globalParams.toxicity);
+      if (typeof globalParams.turbulenceX === 'number') {
+        sim.physicsParams.turbulenceX = globalParams.turbulenceX;
+      }
+      if (typeof globalParams.turbulenceY === 'number') {
+        sim.physicsParams.turbulenceY = globalParams.turbulenceY;
+      }
+      const tissue = puzzle?.tissues?.[sim.tissueIndex];
+      if (tissue) {
+        sim.setDeathThreshold(tissue.deathThreshold || 5);
+      }
+    }
+
+    if (msg.command === 'reset' || msg.command === 'restart') {
+      for (let sim of simulations) {
+        sim.reset();
+      }
+    }
+
+    updateScoreboard();
+    sendStats();
+  });
+
+  // Handle reset from Pi master
+  network.onReset(() => {
+    for (let sim of simulations) {
+      sim.reset();
+    }
+    updateScoreboard();
+  });
 }
 
-// Broadcast stats to dashboard for bar graph
-function broadcastStats() {
-  if (!broadcastChannel) return;
+// Send stats to Pi master or dashboard
+function sendStats() {
+  if (!network) return;
 
   const stats = simulations.map(sim => {
     const s = sim.getStats();
+    const testStatus = sim.getTestStatus();
     return {
+      tissueIndex: sim.tissueIndex,
       name: sim.tissue.name,
       theoreticalScore: s.theoreticalScore,
       absorptionEfficiency: s.absorptionEfficiency,
       totalAbsorbedDrugs: s.totalAbsorbedDrugs,
-      attempts: s.attempts
+      attempts: s.attempts,
+      progress: testStatus.testMode ? (testStatus.released / Math.max(1, testStatus.total)) : 0
     };
   });
 
-  broadcastChannel.postMessage({
-    type: 'stats',
-    stats: stats
+  network.sendStats(stats);
+
+  // Check if all simulations are complete (test mode ended)
+  const allDone = simulations.every(sim => {
+    const ts = sim.getTestStatus();
+    return !ts.testMode || (ts.released >= ts.total && sim.particles && sim.particles.length === 0);
   });
+  if (allDone && simulations.some(sim => sim.getTestStatus().released > 0)) {
+    network.sendTestComplete(stats);
+  }
 }
 
 function applyPuzzle(p) {
@@ -412,10 +441,10 @@ function updateScoreboard() {
   scoreboardDiv.innerHTML = html;
 }
 
-// Periodically refresh scoreboard and broadcast stats to dashboard
+// Periodically refresh scoreboard and send stats
 setInterval(() => {
   updateScoreboard();
-  broadcastStats();
+  sendStats();
 }, 800);
 
 // Expose global functions for compatibility with dashboard.html if opened together

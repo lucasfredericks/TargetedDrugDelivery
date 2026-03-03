@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Targeted Drug Delivery - Results</title>
+    <link rel="stylesheet" href="/static/display.css">
+</head>
+<body>
+    <header>
+        <h1>Targeted Drug Delivery</h1>
+        <span id="status-badge" class="status-badge status-idle">IDLE</span>
+    </header>
+
+    <main>
+        <div class="panel-left">
+            <!-- Nanoparticle preview -->
+            <div class="card">
+                <h2>Nanoparticle</h2>
+                <canvas id="nanoparticle-canvas" width="200" height="200"></canvas>
+                <div id="ligand-list" class="ligand-list"></div>
+            </div>
+
+            <!-- Puzzle info -->
+            <div class="card">
+                <h2>Puzzle</h2>
+                <div id="puzzle-info">
+                    <div class="waiting-message" style="height:auto;font-size:1em;">
+                        Scan RFID tag to load puzzle
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-right">
+            <div id="results-area" class="results-grid">
+                <div class="waiting-message" style="grid-column:1/-1;">
+                    Scan nanoparticle and puzzle to begin
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <span class="client-count">Clients: <span id="client-count">0</span></span>
+        <span id="connection-status">Connecting...</span>
+    </footer>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="/static/display.js"></script>
+</body>
+</html>

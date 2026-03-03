@@ -1,0 +1,13 @@
+{
+  "_comment": "RGB reference values for each ligand color. Run color_calibration.py to update these with actual sensor readings.",
+  "colors": {
+    "Red":    {"r": 200, "g": 30,  "b": 30 },
+    "Blue":   {"r": 30,  "g": 50,  "b": 200},
+    "Green":  {"r": 30,  "g": 180, "b": 40 },
+    "Purple": {"r": 140, "g": 30,  "b": 180},
+    "Orange": {"r": 220, "g": 120, "b": 20 },
+    "Yellow": {"r": 220, "g": 210, "b": 30 }
+  },
+  "none_threshold": 50,
+  "_none_threshold_comment": "If the clear channel reads below this value, treat as 'no ligand present' (empty slot)"
+}

@@ -1,0 +1,150 @@
+"""I2C sensor service for reading 6 APDS-9960 color sensors via TCA9548A multiplexer.
+
+Each sensor reads the color of one ligand slot on the physical nanoparticle model.
+RGB values are mapped to the nearest known ligand color using Euclidean distance.
+"""
+
+import json
+import math
+import logging
+
+import board
+import busio
+import adafruit_tca9548a
+from adafruit_apds9960.apds9960 import APDS9960
+
+from config import (
+    MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH, COLOR_NONE
+)
+
+logger = logging.getLogger(__name__)
+
+
+class SensorService:
+    """Reads 6 APDS-9960 color sensors through a TCA9548A I2C multiplexer."""
+
+    def __init__(self):
+        self.i2c = None
+        self.mux = None
+        self.sensors = []
+        self.color_map = {}
+        self.none_threshold = 50
+
+    def initialize(self):
+        """Set up I2C bus, multiplexer, and all 6 sensors."""
+        self._load_color_map()
+
+        self.i2c = busio.I2C(board.SCL, board.SDA)
+        self.mux = adafruit_tca9548a.TCA9548A(self.i2c, address=MUX_ADDRESS)
+
+        self.sensors = []
+        for channel in range(NUM_SENSORS):
+            try:
+                sensor = APDS9960(self.mux[channel])
+                sensor.enable_color = True
+                self.sensors.append(sensor)
+                logger.info("Initialized APDS-9960 on mux channel %d", channel)
+            except Exception as e:
+                logger.error("Failed to init sensor on channel %d: %s", channel, e)
+                self.sensors.append(None)
+
+    def _load_color_map(self):
+        """Load RGB reference values from color_map.json."""
+        with open(COLOR_MAP_PATH, "r") as f:
+            data = json.load(f)
+
+        self.color_map = {}
+        for name, rgb in data["colors"].items():
+            self.color_map[name] = (rgb["r"], rgb["g"], rgb["b"])
+
+        self.none_threshold = data.get("none_threshold", 50)
+        logger.info("Loaded color map with %d colors", len(self.color_map))
+
+    def read_raw(self, channel):
+        """Read raw RGBC values from a single sensor channel.
+
+        Returns (r, g, b, c) tuple or None if sensor unavailable.
+        """
+        if channel >= len(self.sensors) or self.sensors[channel] is None:
+            return None
+
+        try:
+            r, g, b, c = self.sensors[channel].color_data
+            return (r, g, b, c)
+        except Exception as e:
+            logger.error("Error reading sensor channel %d: %s", channel, e)
+            return None
+
+    def normalize_rgb(self, r, g, b, c):
+        """Normalize raw RGBC to 0-255 RGB using the clear channel."""
+        if c == 0:
+            return (0, 0, 0)
+
+        scale = 255.0 / c
+        return (
+            min(255, int(r * scale)),
+            min(255, int(g * scale)),
+            min(255, int(b * scale))
+        )
+
+    def classify_color(self, r, g, b, c):
+        """Map normalized RGB to the nearest ligand color name.
+
+        Returns (color_name, color_index) or ("None", -1) if below threshold.
+        """
+        if c < self.none_threshold:
+            return ("None", COLOR_NONE)
+
+        nr, ng, nb = self.normalize_rgb(r, g, b, c)
+
+        best_name = "None"
+        best_dist = float("inf")
+
+        for name, (ref_r, ref_g, ref_b) in self.color_map.items():
+            dist = math.sqrt(
+                (nr - ref_r) ** 2 +
+                (ng - ref_g) ** 2 +
+                (nb - ref_b) ** 2
+            )
+            if dist < best_dist:
+                best_dist = dist
+                best_name = name
+
+        if best_name in LIGAND_COLORS:
+            return (best_name, LIGAND_COLORS.index(best_name))
+        return ("None", COLOR_NONE)
+
+    def read_all(self):
+        """Read all 6 sensors and return ligand positions array.
+
+        Returns a dict with:
+          - ligandPositions: [int] array of 6 color indices (-1 for empty)
+          - colors: [str] array of 6 color names
+          - raw: [dict] raw RGBC data per channel (for debugging)
+        """
+        ligand_positions = []
+        color_names = []
+        raw_data = []
+
+        for ch in range(NUM_SENSORS):
+            reading = self.read_raw(ch)
+            if reading is None:
+                ligand_positions.append(COLOR_NONE)
+                color_names.append("None")
+                raw_data.append(None)
+                continue
+
+            r, g, b, c = reading
+            name, index = self.classify_color(r, g, b, c)
+
+            ligand_positions.append(index)
+            color_names.append(name)
+            raw_data.append({"r": r, "g": g, "b": b, "c": c})
+
+        logger.info("Sensor read: %s", color_names)
+
+        return {
+            "ligandPositions": ligand_positions,
+            "colors": color_names,
+            "raw": raw_data
+        }
