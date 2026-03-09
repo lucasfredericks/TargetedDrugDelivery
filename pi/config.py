@@ -37,6 +37,11 @@ DEFAULT_TOXICITY = 2
 # Stats update interval from clients (ms)
 STATS_INTERVAL_MS = 800
 
+# RFID (MFRC522 via SPI)
+RFID_RST_PIN = 6        # GPIO 6 (D6 on Qwiic pHAT)
+RFID_SPI_BUS = 0        # SPI0
+RFID_SPI_DEVICE = 0     # CE0 (CS pin on Qwiic pHAT)
+
 # GPIO pin assignments (BCM numbering)
 GPIO_BUTTON_SCAN = 17
 GPIO_BUTTON_TEST = 27

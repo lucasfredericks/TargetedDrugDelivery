@@ -11,8 +11,8 @@ adafruit-blinka>=8.0
 adafruit-circuitpython-apds9960>=3.0
 adafruit-circuitpython-tca9548a>=0.7
 
-# RFID reader
-mfrc522>=0.0.7
+# RFID reader (Pi 5-compatible fork using gpiozero instead of RPi.GPIO)
+# Install separately: pip install git+https://github.com/Dennis-89/MFRC522-python-SimpleMFRC522.git
 
-# GPIO (pre-installed on Raspberry Pi OS, listed for completeness)
-RPi.GPIO>=0.7
+# GPIO — installed as system packages (sudo apt install python3-lgpio)
+# lgpio (Pi 5) and RPi.GPIO (Pi 4) are accessed via --system-site-packages venv

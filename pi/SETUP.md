@@ -88,19 +88,22 @@ Each APDS-9960 also needs:
 All 6 sensors share the same I2C address (0x39), which is why the
 multiplexer is required.
 
-### MFRC522 RFID Reader
+### MFRC522 RFID Reader (Sunfounder RC522)
 
-    Pi GPIO              MFRC522
-    ---------            -------
-    Pin 24 (SPI CE0)  -> SDA (SS)
-    Pin 23 (SPI SCLK) -> SCK
-    Pin 19 (SPI MOSI) -> MOSI
-    Pin 21 (SPI MISO) -> MISO
-    Pin 22 (GPIO 25)  -> RST
-    Pin 1  (3.3V)     -> 3.3V
-    Pin 6  (GND)      -> GND
+Using the Sparkfun Qwiic pHAT breakout pins:
+
+    Qwiic pHAT          MFRC522
+    ----------           -------
+    CS   (GPIO 8)     -> SDA (chip select — labeled SDA on the module)
+    SCK  (GPIO 11)    -> SCK
+    MOSI (GPIO 10)    -> MOSI
+    MISO (GPIO 9)     -> MISO
+    D6   (GPIO 6)     -> RST
+    3.3V              -> 3.3V
+    GND               -> GND
 
     IMPORTANT: The MFRC522 runs at 3.3V. Do NOT connect to 5V.
+    Note: The MFRC522 IRQ pin is not used.
 
 ### Buttons
 
@@ -123,18 +126,27 @@ To use different GPIO pins, update the values in config.py:
 Step 3: Install Python Dependencies
 ------------------------------------
 
+First, install system-level dependencies that require C compilation:
+
+    sudo apt install swig python3-lgpio liblgpio-dev
+
+Raspberry Pi OS Bookworm and later require a virtual environment for pip
+installs. Use --system-site-packages so the venv can access system-installed
+hardware libraries (lgpio, RPi.GPIO) that have C dependencies:
+
     cd pi/
-    pip install -r requirements.txt
-
-If you encounter permission errors, use:
-
-    pip install --user -r requirements.txt
-
-Or create a virtual environment:
-
-    python -m venv venv
+    python -m venv --system-site-packages venv
     source venv/bin/activate
     pip install -r requirements.txt
+    pip install git+https://github.com/Dennis-89/MFRC522-python-SimpleMFRC522.git
+
+You must activate the venv before running any Pi scripts:
+
+    source venv/bin/activate
+
+Tip: Add it to your .bashrc so it activates on login:
+
+    echo 'source ~/TargetedDrugDelivery/pi/venv/bin/activate' >> ~/.bashrc
 
 
 Step 4: Verify Sensor Wiring
@@ -316,7 +328,7 @@ Contents:
     Type=simple
     User=pi
     WorkingDirectory=/home/pi/Targeted-Drug-Delivery/pi
-    ExecStart=/usr/bin/python master_server.py
+    ExecStart=/home/pi/Targeted-Drug-Delivery/pi/venv/bin/python master_server.py
     Restart=always
     RestartSec=5
 

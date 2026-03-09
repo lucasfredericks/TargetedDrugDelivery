@@ -1,27 +1,31 @@
 """RFID reader service for loading puzzle configurations.
 
 Reads MFRC522 RFID tags via SPI and looks up puzzle configs from local JSON files.
+Uses the Sunfounder MFRC522 module connected to the Sparkfun Qwiic pHAT SPI pins.
+
+Requires the Pi 5-compatible MFRC522 fork (uses gpiozero instead of RPi.GPIO):
+    pip install git+https://github.com/Dennis-89/MFRC522-python-SimpleMFRC522.git
+
+Wiring (Qwiic pHAT → MFRC522):
+    MOSI → MOSI
+    MISO → MISO
+    SCK  → SCK
+    CS   → SDA (chip select, labeled SDA on the MFRC522 module)
+    D6   → RST
+    3.3V → 3.3V
+    GND  → GND
 """
 
 import json
 import os
 import logging
 
-from config import PUZZLES_DIR, PUZZLES_INDEX_PATH
+from config import (
+    PUZZLES_DIR, PUZZLES_INDEX_PATH,
+    RFID_RST_PIN, RFID_SPI_BUS, RFID_SPI_DEVICE
+)
 
 logger = logging.getLogger(__name__)
-
-# MFRC522 import is deferred to avoid errors on non-Pi systems
-_MFRC522 = None
-
-
-def _get_reader():
-    """Lazy-load MFRC522 reader (only works on Pi with SPI enabled)."""
-    global _MFRC522
-    if _MFRC522 is None:
-        from mfrc522 import SimpleMFRC522
-        _MFRC522 = SimpleMFRC522()
-    return _MFRC522
 
 
 class RFIDService:
@@ -32,11 +36,24 @@ class RFIDService:
         self.reader = None
 
     def initialize(self):
-        """Load puzzle index and prepare RFID reader."""
+        """Load puzzle index and prepare RFID reader.
+
+        Creates SimpleMFRC522, then replaces its internal MFRC522 instance
+        with one configured for our custom RST pin (SimpleMFRC522's
+        constructor doesn't expose pin_rst).
+        """
         self._load_puzzle_index()
         try:
-            self.reader = _get_reader()
-            logger.info("RFID reader initialized")
+            from mfrc522 import MFRC522, SimpleMFRC522
+            self.reader = SimpleMFRC522()
+            # Replace the default MFRC522 with one using our RST pin
+            self.reader.reader = MFRC522(
+                bus=RFID_SPI_BUS,
+                device=RFID_SPI_DEVICE,
+                pin_rst=RFID_RST_PIN
+            )
+            logger.info("RFID reader initialized (RST=GPIO%d, SPI%d.%d)",
+                        RFID_RST_PIN, RFID_SPI_BUS, RFID_SPI_DEVICE)
         except Exception as e:
             logger.error("Failed to initialize RFID reader: %s", e)
             self.reader = None
