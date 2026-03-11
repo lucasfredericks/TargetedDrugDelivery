@@ -19,10 +19,13 @@
   const turbulenceYEl = document.getElementById('turbulenceY');
   const turbulenceYLabel = document.getElementById('turbulenceYLabel');
   const loadBtn = document.getElementById('loadPuzzle');
+  const puzzleFileInput = document.getElementById('puzzleFileInput');
   const resetBtn = document.getElementById('resetSim');
   const testBtn = document.getElementById('testBtn');
   const randomizeLigandsBtn = document.getElementById('randomizeLigands');
   const savePuzzleBtn = document.getElementById('savePuzzle');
+  const puzzleIdInput = document.getElementById('puzzleId');
+  const constructorNotesInput = document.getElementById('constructorNotes');
   const affinityContent = document.getElementById('affinityContent');
   const killRateContent = document.getElementById('killRateContent');
 
@@ -218,9 +221,23 @@
     return { id: 'default', tissues: tissues, ligandCounts: [0,0,0,0,0,0], toxicity: toxicity };
   }
 
+  function buildPuzzleOutput() {
+    const puzzle = window.currentPuzzle || defaultPuzzle();
+    return {
+      id: puzzleIdInput.value.trim() || puzzle.id || 'custom-puzzle',
+      toxicity: toxicity,
+      constructorNotes: constructorNotesInput.value.trim(),
+      tissues: puzzle.tissues.map(t => ({
+        name: t.name,
+        receptors: t.receptors.map(r => parseFloat(r.toFixed(4))),
+        deathThreshold: t.deathThreshold || 5
+      }))
+    };
+  }
+
   function updatePuzzleView(){
     if (!window.currentPuzzle) { puzzleView.textContent = 'No puzzle loaded'; return; }
-    puzzleView.textContent = JSON.stringify(window.currentPuzzle, null, 2);
+    puzzleView.textContent = JSON.stringify(buildPuzzleOutput(), null, 2);
   }
 
   // Render tissue controls: for each tissue, show six sliders (0.0 - 1.0)
@@ -326,22 +343,39 @@
     debouncedSendParams();
   };
 
-  loadBtn.onclick = ()=>{
-    fetch('puzzle_example.json').then(r=>r.json()).then(p=>{
-      window.currentPuzzle = p; puzzleView.textContent = JSON.stringify(p, null, 2);
-      // default populate ligandSlots from counts if provided
-      if (Array.isArray(p.ligandCounts)){
-        // fill slots in color order
-        let pos = [];
-        for (let c=0;c<6;c++){ let count = Math.max(0, Math.floor(p.ligandCounts[c]||0)); for (let k=0;k<count && pos.length<6;k++) pos.push(c); }
-        while(pos.length<6) pos.push(-1);
-        for (let i=0;i<6;i++){ ligandSlots[i]=pos[i]; ligandRow.children[i].value = String(pos[i]); }
-        drawPreview();
+  function loadPuzzle(p) {
+    window.currentPuzzle = p;
+    puzzleIdInput.value = p.id || 'custom-puzzle';
+    constructorNotesInput.value = p.constructorNotes || '';
+    puzzleView.textContent = JSON.stringify(p, null, 2);
+    // default populate ligandSlots from counts if provided
+    if (Array.isArray(p.ligandCounts)){
+      let pos = [];
+      for (let c=0;c<6;c++){ let count = Math.max(0, Math.floor(p.ligandCounts[c]||0)); for (let k=0;k<count && pos.length<6;k++) pos.push(c); }
+      while(pos.length<6) pos.push(-1);
+      for (let i=0;i<6;i++){ ligandSlots[i]=pos[i]; ligandRow.children[i].value = String(pos[i]); }
+      drawPreview();
+    }
+    renderTissueControls(p);
+    sendParams();
+  }
+
+  loadBtn.onclick = () => puzzleFileInput.click();
+
+  puzzleFileInput.onchange = () => {
+    const file = puzzleFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const p = JSON.parse(e.target.result);
+        loadPuzzle(p);
+      } catch (err) {
+        alert('Invalid puzzle JSON file');
       }
-      // render controls for the loaded puzzle and send params
-      renderTissueControls(p);
-      sendParams();
-    });
+    };
+    reader.readAsText(file);
+    puzzleFileInput.value = ''; // allow re-loading same file
   };
 
   resetBtn.onclick = ()=>{
@@ -390,23 +424,18 @@
     sendParams(); // Send immediately on button click
   };
 
+  // Update preview when ID or notes change
+  puzzleIdInput.oninput = () => updatePuzzleView();
+  constructorNotesInput.oninput = () => updatePuzzleView();
+
   // Save puzzle button: export current parameters as a JSON file download
   savePuzzleBtn.onclick = () => {
-    const puzzle = window.currentPuzzle || defaultPuzzle();
-    const output = {
-      id: puzzle.id || 'custom-puzzle',
-      toxicity: toxicity,
-      tissues: puzzle.tissues.map(t => ({
-        name: t.name,
-        receptors: t.receptors.map(r => parseFloat(r.toFixed(4))),
-        deathThreshold: t.deathThreshold || 5
-      }))
-    };
+    const output = buildPuzzleOutput();
     const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `puzzle-${output.id}.json`;
+    a.download = `${output.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -417,24 +446,8 @@
 
   // Auto-load the puzzle on startup so dashboard has the same state as simulation
   fetch('puzzle_example.json').then(r=>r.json()).then(p=>{
-    window.currentPuzzle = p;
-    // Populate ligand slots from counts if provided
-    if (Array.isArray(p.ligandCounts)){
-      let pos = [];
-      for (let c=0;c<6;c++){
-        let count = Math.max(0, Math.floor(p.ligandCounts[c]||0));
-        for (let k=0;k<count && pos.length<6;k++) pos.push(c);
-      }
-      while(pos.length<6) pos.push(-1);
-      for (let i=0;i<6;i++){
-        ligandSlots[i]=pos[i];
-        ligandRow.children[i].value = String(pos[i]);
-      }
-      drawPreview();
-    }
-    renderTissueControls(p);
+    loadPuzzle(p);
   }).catch(()=>{
-    // If puzzle load fails, render with default
     renderTissueControls();
   });
 })();

@@ -30,7 +30,8 @@
   <div id="controls">
     <div>
       <div style="margin-bottom:8px">
-        <button id="loadPuzzle">Load example puzzle</button>
+        <button id="loadPuzzle">Load puzzle</button>
+        <input type="file" id="puzzleFileInput" accept=".json" style="display:none">
         <label>Particles per tissue: <input id="particleCount" type="range" min="100" max="3000" step="100" value="1000"><span id="particleCountLabel">1000</span></label>
         <button id="resetSim">Reset</button>
         <button id="savePuzzle">Save puzzle</button>
@@ -70,8 +71,15 @@
     </div>
   </div>
 
+  <div style="margin-top:12px;max-width:800px">
+    <label>Puzzle ID: <input id="puzzleId" type="text" value="example-01" style="width:200px"></label>
+    <div style="margin-top:6px">
+      <label>Constructor notes:<br><textarea id="constructorNotes" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px" placeholder="Notes about this puzzle..."></textarea></label>
+    </div>
+  </div>
+
   <div class="tissues">
-    <strong>Puzzle tissues (example):</strong>
+    <strong>Puzzle tissues:</strong>
     <div id="tissueControls" style="margin-top:8px"></div>
     <pre id="puzzleView" style="background:#f8f8f8;padding:8px;border-radius:4px;max-width:800px;margin-top:8px"></pre>
   </div>
