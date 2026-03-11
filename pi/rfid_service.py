@@ -1,6 +1,9 @@
 """RFID reader service for loading puzzle configurations.
 
-Reads MFRC522 RFID tags via SPI and looks up puzzle configs from local JSON files.
+Reads MFRC522 RFID tags via SPI and looks up puzzle configs by tag UID.
+No data needs to be written to the tags — the factory UID is used as the key
+into a local JSON mapping (puzzles/index.json).
+
 Uses the Sunfounder MFRC522 module connected to the Sparkfun Qwiic pHAT SPI pins.
 
 Requires the Pi 5-compatible MFRC522 fork (uses gpiozero instead of RPi.GPIO):
@@ -59,7 +62,11 @@ class RFIDService:
             self.reader = None
 
     def _load_puzzle_index(self):
-        """Load the tag ID → puzzle file mapping."""
+        """Load the tag UID → puzzle file mapping.
+
+        The index maps string UIDs to puzzle filenames, e.g.:
+            { "123456789": "puzzle-example-01.json" }
+        """
         if not os.path.exists(PUZZLES_INDEX_PATH):
             logger.warning("Puzzle index not found at %s", PUZZLES_INDEX_PATH)
             self.puzzle_index = {}
@@ -98,16 +105,17 @@ class RFIDService:
         except Exception:
             return None, None
 
-    def lookup_puzzle(self, tag_text):
-        """Look up a puzzle config by tag text (puzzle ID string).
+    def lookup_puzzle(self, tag_id):
+        """Look up a puzzle config by tag UID.
 
         Returns the puzzle dict or None if not found.
         """
-        if tag_text not in self.puzzle_index:
-            logger.warning("Unknown puzzle ID: '%s'", tag_text)
+        uid_key = str(tag_id)
+        if uid_key not in self.puzzle_index:
+            logger.warning("Unknown tag UID: %s", uid_key)
             return None
 
-        puzzle_file = self.puzzle_index[tag_text]
+        puzzle_file = self.puzzle_index[uid_key]
         puzzle_path = os.path.join(PUZZLES_DIR, puzzle_file)
 
         if not os.path.exists(puzzle_path):
@@ -117,7 +125,7 @@ class RFIDService:
         with open(puzzle_path, "r") as f:
             puzzle = json.load(f)
 
-        logger.info("Loaded puzzle '%s' from %s", tag_text, puzzle_file)
+        logger.info("Loaded puzzle for UID %s from %s", uid_key, puzzle_file)
         return puzzle
 
     def scan_and_load(self):
@@ -125,9 +133,9 @@ class RFIDService:
 
         Returns (puzzle_id, puzzle_dict) or (None, None).
         """
-        tag_id, tag_text = self.read_tag()
-        if tag_text is None or tag_text == "":
+        tag_id, _ = self.read_tag()
+        if tag_id is None:
             return None, None
 
-        puzzle = self.lookup_puzzle(tag_text)
-        return tag_text, puzzle
+        puzzle = self.lookup_puzzle(tag_id)
+        return str(tag_id), puzzle

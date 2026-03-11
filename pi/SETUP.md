@@ -189,30 +189,48 @@ Results are saved to color_map.json. Re-run calibration if you change:
 - The ambient lighting conditions
 
 
-Step 6: Program RFID Tags
---------------------------
+Step 6: Verify RFID Reader
+---------------------------
 
-Each RFID tag stores a puzzle ID string that maps to a JSON puzzle file.
+Run the RFID test script to confirm the reader is working:
+
+    python test_rfid.py --once
+
+This reads one tag and prints its UID. Other modes:
+
+    python test_rfid.py              # Continuous scan (blocking reads)
+    python test_rfid.py --poll       # Non-blocking polling
+    python test_rfid.py --lookup     # Also show puzzle mapping if registered
+
+If initialization fails, check that SPI is enabled (Step 1) and wiring
+matches the diagram in Step 2.
+
+
+Step 7: Register RFID Tags
+---------------------------
+
+Each RFID tag is identified by its factory UID (no data needs to be written
+to the tag). You just need to scan each tag once to learn its UID, then map
+it to a puzzle file.
 
 1. Create puzzle JSON files in the puzzles/ directory. Use
    puzzles/puzzle-example-01.json as a template.
 
-2. Add entries to puzzles/index.json mapping tag text to filenames:
+2. Scan each tag to get its UID:
+
+    python test_rfid.py --once
+
+3. Add entries to puzzles/index.json mapping each UID to a puzzle file:
 
     {
-      "puzzle-example-01": "puzzle-example-01.json",
-      "puzzle-hard-02": "puzzle-hard-02.json"
+      "123456789": "puzzle-example-01.json",
+      "987654321": "puzzle-hard-02.json"
     }
 
-3. Write the puzzle ID string to each RFID tag. You can use any RFID
-   writing tool, or create a simple Python script:
-
-    from mfrc522 import SimpleMFRC522
-    reader = SimpleMFRC522()
-    reader.write("puzzle-example-01")
+   Replace the numbers with the actual UIDs printed in step 2.
 
 
-Step 7: Network Setup
+Step 8: Network Setup
 ----------------------
 
 For a self-contained exhibit network (no internet required):
@@ -259,7 +277,7 @@ Client computers will automatically receive IP addresses when connected
 to the switch.
 
 
-Step 8: Start the Master Server
+Step 9: Start the Master Server
 --------------------------------
 
     cd pi/
@@ -277,7 +295,7 @@ To skip hardware that isn't connected (for testing):
     python master_server.py --no-gpio --no-sensors --no-rfid
 
 
-Step 9: Connect Client Computers
+Step 10: Connect Client Computers
 ----------------------------------
 
 On each client computer, open the simulation in a web browser:
@@ -296,7 +314,7 @@ Tissues are assigned automatically based on the number of clients:
 - 4 clients: 1 tissue each
 
 
-Step 10: Open the Results Display
+Step 11: Open the Results Display
 -----------------------------------
 
 On the Pi itself, open Chromium to the display page:
@@ -311,7 +329,7 @@ to exit). The display shows:
 - Test progress and status
 
 
-Step 11: Auto-Start on Boot (Optional)
+Step 12: Auto-Start on Boot (Optional)
 ----------------------------------------
 
 Create a systemd service to start the master server automatically:
