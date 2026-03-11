@@ -22,6 +22,7 @@
   const resetBtn = document.getElementById('resetSim');
   const testBtn = document.getElementById('testBtn');
   const randomizeLigandsBtn = document.getElementById('randomizeLigands');
+  const savePuzzleBtn = document.getElementById('savePuzzle');
   const affinityContent = document.getElementById('affinityContent');
   const killRateContent = document.getElementById('killRateContent');
 
@@ -387,6 +388,27 @@
     drawPreview();
     updateTheoreticalScores();
     sendParams(); // Send immediately on button click
+  };
+
+  // Save puzzle button: export current parameters as a JSON file download
+  savePuzzleBtn.onclick = () => {
+    const puzzle = window.currentPuzzle || defaultPuzzle();
+    const output = {
+      id: puzzle.id || 'custom-puzzle',
+      toxicity: toxicity,
+      tissues: puzzle.tissues.map(t => ({
+        name: t.name,
+        receptors: t.receptors.map(r => parseFloat(r.toFixed(4))),
+        deathThreshold: t.deathThreshold || 5
+      }))
+    };
+    const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `puzzle-${output.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Initial setup
