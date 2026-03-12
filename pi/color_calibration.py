@@ -1,8 +1,8 @@
 """Calibration utility for APDS-9960 color sensors.
 
 Run this script interactively on the Pi to calibrate RGB reference values
-for each ligand color. Place each colored ligand piece under a sensor,
-take a reading, and save the results to color_map.json.
+for each ligand color. For each color, place that ligand under ALL sensors,
+then readings are taken from every sensor and averaged to color_map.json.
 
 Usage:
     python color_calibration.py
@@ -19,65 +19,63 @@ from config import LIGAND_COLORS, COLOR_MAP_PATH, NUM_SENSORS
 def calibrate():
     print("=== APDS-9960 Color Calibration Utility ===\n")
     print("This utility will help you calibrate the color sensors.")
-    print("You will place each colored ligand under sensor 0 (first mux channel)")
-    print("and record its RGB values.\n")
+    print(f"For each color, place that ligand under ALL {NUM_SENSORS} sensors,")
+    print("then readings will be taken from every sensor and averaged.\n")
 
     service = SensorService()
     service.initialize()
 
-    # Use sensor 0 for calibration (any channel works since sensors are identical)
-    cal_channel = 0
-
     calibrated = {}
 
     for color_name in LIGAND_COLORS:
-        input(f"\nPlace the {color_name} ligand under sensor {cal_channel} and press Enter...")
+        input(f"\nPlace the {color_name} ligand under ALL sensors and press Enter...")
 
-        # Take multiple readings and average
-        readings = []
-        print(f"  Reading {color_name}...", end="", flush=True)
-        for _ in range(10):
-            raw = service.read_raw(cal_channel)
-            if raw is not None:
-                readings.append(raw)
-            time.sleep(0.1)
-        print(" done.")
+        all_readings = []
+        for ch in range(NUM_SENSORS):
+            print(f"  Reading sensor {ch}...", end="", flush=True)
+            for _ in range(10):
+                raw = service.read_raw(ch)
+                if raw is not None:
+                    all_readings.append(raw)
+                time.sleep(0.1)
+            print(" done.")
 
-        if not readings:
-            print(f"  ERROR: No readings for {color_name}. Check sensor connection.")
+        if not all_readings:
+            print(f"  ERROR: No readings for {color_name}. Check sensor connections.")
             continue
 
-        # Average the readings
-        avg_r = sum(r for r, g, b, c in readings) / len(readings)
-        avg_g = sum(g for r, g, b, c in readings) / len(readings)
-        avg_b = sum(b for r, g, b, c in readings) / len(readings)
-        avg_c = sum(c for r, g, b, c in readings) / len(readings)
+        # Average across all sensors
+        avg_r = sum(r for r, g, b, c in all_readings) / len(all_readings)
+        avg_g = sum(g for r, g, b, c in all_readings) / len(all_readings)
+        avg_b = sum(b for r, g, b, c in all_readings) / len(all_readings)
+        avg_c = sum(c for r, g, b, c in all_readings) / len(all_readings)
 
         # Normalize to 0-255
         nr, ng, nb = service.normalize_rgb(avg_r, avg_g, avg_b, avg_c)
 
-        print(f"  Raw RGBC: ({avg_r:.0f}, {avg_g:.0f}, {avg_b:.0f}, {avg_c:.0f})")
+        print(f"  Avg Raw RGBC: ({avg_r:.0f}, {avg_g:.0f}, {avg_b:.0f}, {avg_c:.0f})")
         print(f"  Normalized RGB: ({nr}, {ng}, {nb})")
 
         calibrated[color_name] = {"r": nr, "g": ng, "b": nb}
 
     # Calibrate the "none" threshold
-    input("\nRemove all ligands (empty slot) and press Enter...")
-    empty_readings = []
-    print("  Reading empty slot...", end="", flush=True)
-    for _ in range(10):
-        raw = service.read_raw(cal_channel)
-        if raw is not None:
-            empty_readings.append(raw)
-        time.sleep(0.1)
-    print(" done.")
+    input("\nRemove all ligands (empty slots) and press Enter...")
+    all_empty = []
+    for ch in range(NUM_SENSORS):
+        print(f"  Reading empty sensor {ch}...", end="", flush=True)
+        for _ in range(10):
+            raw = service.read_raw(ch)
+            if raw is not None:
+                all_empty.append(raw)
+            time.sleep(0.1)
+        print(" done.")
 
     none_threshold = 50
-    if empty_readings:
-        avg_clear = sum(c for r, g, b, c in empty_readings) / len(empty_readings)
+    if all_empty:
+        avg_clear = sum(c for r, g, b, c in all_empty) / len(all_empty)
         # Set threshold slightly above the empty-slot clear reading
         none_threshold = int(avg_clear * 1.5)
-        print(f"  Empty slot clear channel: {avg_clear:.0f}")
+        print(f"  Avg empty clear channel: {avg_clear:.0f}")
         print(f"  Setting none_threshold to: {none_threshold}")
 
     # Save
