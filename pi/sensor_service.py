@@ -95,16 +95,14 @@ class SensorService:
         if c < self.none_threshold:
             return ("None", COLOR_NONE)
 
-        nr, ng, nb = self.normalize_rgb(r, g, b, c)
-
         best_name = "None"
         best_dist = float("inf")
 
         for name, (ref_r, ref_g, ref_b) in self.color_map.items():
             dist = math.sqrt(
-                (nr - ref_r) ** 2 +
-                (ng - ref_g) ** 2 +
-                (nb - ref_b) ** 2
+                (r - ref_r) ** 2 +
+                (g - ref_g) ** 2 +
+                (b - ref_b) ** 2
             )
             if dist < best_dist:
                 best_dist = dist
