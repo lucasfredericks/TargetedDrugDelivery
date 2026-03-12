@@ -29,7 +29,6 @@ class SensorService:
         self.mux = None
         self.sensors = []
         self.color_map = {}
-        self.none_threshold = 50
 
     def initialize(self):
         """Set up I2C bus, multiplexer, and all 6 sensors."""
@@ -60,7 +59,6 @@ class SensorService:
         for name, rgb in data["colors"].items():
             self.color_map[name] = (rgb["r"], rgb["g"], rgb["b"])
 
-        self.none_threshold = data.get("none_threshold", 50)
         logger.info("Loaded color map with %d colors", len(self.color_map))
 
     def read_raw(self, channel):
@@ -95,13 +93,11 @@ class SensorService:
         )
 
     def classify_color(self, r, g, b, c):
-        """Map normalized RGB to the nearest ligand color name.
+        """Map normalized RGB to the nearest calibrated color name.
 
-        Returns (color_name, color_index) or ("None", -1) if below threshold.
+        Returns (color_name, color_index). "None" is treated as a calibrated
+        color (empty slot signature) just like any ligand color.
         """
-        if c < self.none_threshold:
-            return ("None", COLOR_NONE)
-
         nr, ng, nb = self.normalize_rgb(r, g, b)
 
         best_name = "None"
