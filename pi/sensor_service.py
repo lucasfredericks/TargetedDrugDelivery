@@ -75,16 +75,20 @@ class SensorService:
             logger.error("Error reading sensor channel %d: %s", channel, e)
             return None
 
-    def normalize_rgb(self, r, g, b, c):
-        """Normalize raw RGBC to 0-255 RGB using the clear channel."""
-        if c == 0:
+    def normalize_rgb(self, r, g, b):
+        """Normalize raw RGB to ratios using the RGB sum.
+
+        Produces light-independent color fingerprints by dividing each
+        channel by the total (R+G+B), then scaling to 0-1000 for precision.
+        """
+        total = r + g + b
+        if total == 0:
             return (0, 0, 0)
 
-        scale = 255.0 / c
         return (
-            min(255, int(r * scale)),
-            min(255, int(g * scale)),
-            min(255, int(b * scale))
+            round(1000.0 * r / total),
+            round(1000.0 * g / total),
+            round(1000.0 * b / total)
         )
 
     def classify_color(self, r, g, b, c):
@@ -95,14 +99,16 @@ class SensorService:
         if c < self.none_threshold:
             return ("None", COLOR_NONE)
 
+        nr, ng, nb = self.normalize_rgb(r, g, b)
+
         best_name = "None"
         best_dist = float("inf")
 
         for name, (ref_r, ref_g, ref_b) in self.color_map.items():
             dist = math.sqrt(
-                (r - ref_r) ** 2 +
-                (g - ref_g) ** 2 +
-                (b - ref_b) ** 2
+                (nr - ref_r) ** 2 +
+                (ng - ref_g) ** 2 +
+                (nb - ref_b) ** 2
             )
             if dist < best_dist:
                 best_dist = dist

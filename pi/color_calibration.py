@@ -50,9 +50,12 @@ def calibrate():
         avg_b = sum(b for r, g, b, c in all_readings) / len(all_readings)
         avg_c = sum(c for r, g, b, c in all_readings) / len(all_readings)
 
-        print(f"  Avg Raw RGBC: ({avg_r:.0f}, {avg_g:.0f}, {avg_b:.0f}, {avg_c:.0f})")
+        nr, ng, nb = service.normalize_rgb(avg_r, avg_g, avg_b)
 
-        calibrated[color_name] = {"r": int(avg_r), "g": int(avg_g), "b": int(avg_b)}
+        print(f"  Avg Raw RGBC: ({avg_r:.0f}, {avg_g:.0f}, {avg_b:.0f}, {avg_c:.0f})")
+        print(f"  Normalized (0-1000): ({nr}, {ng}, {nb})")
+
+        calibrated[color_name] = {"r": nr, "g": ng, "b": nb}
 
     # Calibrate the "none" threshold
     input("\nRemove all ligands (empty slots) and press Enter...")
