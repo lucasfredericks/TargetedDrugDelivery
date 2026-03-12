@@ -12,6 +12,12 @@ MUX_ADDRESS = 0x70
 # Number of APDS-9960 sensors (one per ligand slot on the nanoparticle)
 NUM_SENSORS = 6
 
+# APDS-9960 color sensing settings
+# color_gain: 0=1x, 1=4x, 2=16x, 3=64x
+COLOR_GAIN = 2  # 16x
+# color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
+COLOR_INTEGRATION_TIME = 256
+
 # Ligand color names matching the simulation's color indices (0-5)
 LIGAND_COLORS = ["Red", "Blue", "Green", "Purple", "Orange", "Yellow"]
 

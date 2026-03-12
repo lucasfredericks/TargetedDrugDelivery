@@ -14,7 +14,8 @@ import adafruit_tca9548a
 from adafruit_apds9960.apds9960 import APDS9960
 
 from config import (
-    MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH, COLOR_NONE
+    MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH, COLOR_NONE,
+    COLOR_GAIN, COLOR_INTEGRATION_TIME
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ class SensorService:
         for channel in range(NUM_SENSORS):
             try:
                 sensor = APDS9960(self.mux[channel])
+                sensor.color_gain = COLOR_GAIN
+                sensor.color_integration_time = COLOR_INTEGRATION_TIME
                 sensor.enable_color = True
                 self.sensors.append(sensor)
                 logger.info("Initialized APDS-9960 on mux channel %d", channel)
