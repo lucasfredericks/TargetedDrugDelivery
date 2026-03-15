@@ -2,7 +2,8 @@
 
 Each sensor reads the color of one ligand slot on the physical nanoparticle model.
 Proximity is used as a hint for empty slot detection when available; color matching
-uses raw RGBC values with Euclidean distance for maximum differentiation.
+normalizes RGB by the clear channel for lighting resilience while preserving color
+information.
 """
 
 import json
@@ -29,7 +30,7 @@ class SensorService:
         self.i2c = None
         self.mux = None
         self.sensors = []
-        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, c)}}
+        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b)}}
         self.proximity_thresholds = {}  # {channel: int}
 
     def initialize(self):
@@ -54,7 +55,7 @@ class SensorService:
                 self.sensors.append(None)
 
     def _load_color_map(self):
-        """Load per-sensor raw RGBC reference values from color_map.json."""
+        """Load per-sensor color reference values from color_map.json."""
         with open(COLOR_MAP_PATH, "r") as f:
             data = json.load(f)
 
@@ -69,7 +70,7 @@ class SensorService:
             self.sensor_color_maps[ch] = {}
             for name, vals in colors.items():
                 self.sensor_color_maps[ch][name] = (
-                    vals["r"], vals["g"], vals["b"], vals.get("c", 0)
+                    vals["r"], vals["g"], vals["b"]
                 )
 
         self.proximity_thresholds = {}
@@ -108,11 +109,26 @@ class SensorService:
             logger.error("Error reading proximity channel %d: %s", channel, e)
             return None
 
+    def normalize_by_clear(self, r, g, b, c):
+        """Normalize RGB by the clear channel, scaled to 0-1000.
+
+        Dividing by clear compensates for brightness while preserving
+        more color information than dividing by the RGB sum.
+        """
+        if c == 0:
+            return (0, 0, 0)
+
+        return (
+            round(1000.0 * r / c),
+            round(1000.0 * g / c),
+            round(1000.0 * b / c)
+        )
+
     def classify_color(self, r, g, b, c, channel):
-        """Map raw RGBC to the nearest calibrated color for this sensor.
+        """Map clear-normalized RGB to the nearest calibrated color.
 
         Uses proximity as a confident "empty" signal when well below threshold.
-        Falls back to 4D color matching (including "None" as a calibrated color)
+        Falls back to 3D color matching (including "None" as a calibrated color)
         so materials that don't reflect IR (e.g. green) still get classified.
         Returns (color_name, color_index).
         """
@@ -127,15 +143,16 @@ class SensorService:
         if not color_map:
             return ("None", COLOR_NONE)
 
+        nr, ng, nb = self.normalize_by_clear(r, g, b, c)
+
         best_name = "None"
         best_dist = float("inf")
 
-        for name, (ref_r, ref_g, ref_b, ref_c) in color_map.items():
+        for name, (ref_r, ref_g, ref_b) in color_map.items():
             dist = math.sqrt(
-                (r - ref_r) ** 2 +
-                (g - ref_g) ** 2 +
-                (b - ref_b) ** 2 +
-                (c - ref_c) ** 2
+                (nr - ref_r) ** 2 +
+                (ng - ref_g) ** 2 +
+                (nb - ref_b) ** 2
             )
             if dist < best_dist:
                 best_dist = dist
