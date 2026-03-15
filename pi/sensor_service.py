@@ -1,7 +1,8 @@
 """I2C sensor service for reading 6 APDS-9960 color sensors via TCA9548A multiplexer.
 
 Each sensor reads the color of one ligand slot on the physical nanoparticle model.
-RGB values are mapped to the nearest known ligand color using Euclidean distance.
+Proximity detects whether a ligand is present; RGB+Clear values are mapped to the
+nearest known ligand color using Euclidean distance.
 """
 
 import json
@@ -28,7 +29,8 @@ class SensorService:
         self.i2c = None
         self.mux = None
         self.sensors = []
-        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b)}}
+        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, c)}}
+        self.proximity_thresholds = {}  # {channel: int}
 
     def initialize(self):
         """Set up I2C bus, multiplexer, and all 6 sensors."""
@@ -44,6 +46,7 @@ class SensorService:
                 sensor.color_gain = COLOR_GAIN
                 sensor.color_integration_time = COLOR_INTEGRATION_TIME
                 sensor.enable_color = True
+                sensor.enable_proximity = True
                 self.sensors.append(sensor)
                 logger.info("Initialized APDS-9960 on mux channel %d", channel)
             except Exception as e:
@@ -51,7 +54,7 @@ class SensorService:
                 self.sensors.append(None)
 
     def _load_color_map(self):
-        """Load per-sensor RGB reference values from color_map.json."""
+        """Load per-sensor RGBC reference values from color_map.json."""
         with open(COLOR_MAP_PATH, "r") as f:
             data = json.load(f)
 
@@ -65,7 +68,13 @@ class SensorService:
             ch = int(ch_str)
             self.sensor_color_maps[ch] = {}
             for name, rgb in colors.items():
-                self.sensor_color_maps[ch][name] = (rgb["r"], rgb["g"], rgb["b"])
+                self.sensor_color_maps[ch][name] = (
+                    rgb["r"], rgb["g"], rgb["b"], rgb.get("c", 0)
+                )
+
+        self.proximity_thresholds = {}
+        for ch_str, threshold in data.get("proximity_thresholds", {}).items():
+            self.proximity_thresholds[int(ch_str)] = threshold
 
         logger.info("Loaded per-sensor color maps for %d sensors",
                      len(self.sensor_color_maps))
@@ -85,6 +94,32 @@ class SensorService:
             logger.error("Error reading sensor channel %d: %s", channel, e)
             return None
 
+    def read_proximity(self, channel):
+        """Read proximity value (0-255) from a single sensor channel.
+
+        Higher values mean closer objects. Returns None if sensor unavailable.
+        """
+        if channel >= len(self.sensors) or self.sensors[channel] is None:
+            return None
+
+        try:
+            return self.sensors[channel].proximity
+        except Exception as e:
+            logger.error("Error reading proximity channel %d: %s", channel, e)
+            return None
+
+    def is_slot_empty(self, channel):
+        """Use proximity to detect whether a ligand is present in the slot."""
+        threshold = self.proximity_thresholds.get(channel)
+        if threshold is None:
+            return False
+
+        prox = self.read_proximity(channel)
+        if prox is None:
+            return True
+
+        return prox < threshold
+
     def normalize_rgb(self, r, g, b):
         """Normalize raw RGB to ratios using the RGB sum.
 
@@ -102,12 +137,15 @@ class SensorService:
         )
 
     def classify_color(self, r, g, b, c, channel):
-        """Map normalized RGB to the nearest calibrated color for this sensor.
+        """Map normalized RGB+Clear to the nearest calibrated color for this sensor.
 
-        Uses the per-sensor color map so each sensor's unique characteristics
-        (LED brightness, mounting distance, photodiode variation) are accounted for.
+        Uses proximity to detect empty slots, then 4D Euclidean distance
+        (normalized R, G, B + clear channel) for color matching.
         Returns (color_name, color_index).
         """
+        if self.is_slot_empty(channel):
+            return ("None", COLOR_NONE)
+
         color_map = self.sensor_color_maps.get(channel, {})
         if not color_map:
             return ("None", COLOR_NONE)
@@ -117,11 +155,12 @@ class SensorService:
         best_name = "None"
         best_dist = float("inf")
 
-        for name, (ref_r, ref_g, ref_b) in color_map.items():
+        for name, (ref_r, ref_g, ref_b, ref_c) in color_map.items():
             dist = math.sqrt(
                 (nr - ref_r) ** 2 +
                 (ng - ref_g) ** 2 +
-                (nb - ref_b) ** 2
+                (nb - ref_b) ** 2 +
+                (c - ref_c) ** 2
             )
             if dist < best_dist:
                 best_dist = dist

@@ -58,11 +58,12 @@ def main():
                 else:
                     r, g, b, c = raw
                     name, idx = service.classify_color(r, g, b, c, ch)
+                    prox = service.read_proximity(ch)
                     if args.raw:
                         print(f"Channel {ch}: {name} (idx={idx})  "
-                              f"Raw: R={r} G={g} B={b} C={c}")
+                              f"Raw: R={r} G={g} B={b} C={c}  Prox={prox}")
                     else:
-                        print(f"Channel {ch}: {name} (idx={idx})")
+                        print(f"Channel {ch}: {name} (idx={idx})  Prox={prox}")
             else:
                 # All channels
                 result = service.read_all()
