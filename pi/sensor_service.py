@@ -56,6 +56,11 @@ class SensorService:
             data = json.load(f)
 
         self.sensor_color_maps = {}
+        if "sensors" not in data:
+            logger.warning("color_map.json missing 'sensors' key — "
+                           "run color_calibration.py to generate it")
+            return
+
         for ch_str, colors in data["sensors"].items():
             ch = int(ch_str)
             self.sensor_color_maps[ch] = {}
