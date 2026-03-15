@@ -28,7 +28,7 @@ class SensorService:
         self.i2c = None
         self.mux = None
         self.sensors = []
-        self.color_map = {}
+        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b)}}
 
     def initialize(self):
         """Set up I2C bus, multiplexer, and all 6 sensors."""
@@ -51,15 +51,19 @@ class SensorService:
                 self.sensors.append(None)
 
     def _load_color_map(self):
-        """Load RGB reference values from color_map.json."""
+        """Load per-sensor RGB reference values from color_map.json."""
         with open(COLOR_MAP_PATH, "r") as f:
             data = json.load(f)
 
-        self.color_map = {}
-        for name, rgb in data["colors"].items():
-            self.color_map[name] = (rgb["r"], rgb["g"], rgb["b"])
+        self.sensor_color_maps = {}
+        for ch_str, colors in data["sensors"].items():
+            ch = int(ch_str)
+            self.sensor_color_maps[ch] = {}
+            for name, rgb in colors.items():
+                self.sensor_color_maps[ch][name] = (rgb["r"], rgb["g"], rgb["b"])
 
-        logger.info("Loaded color map with %d colors", len(self.color_map))
+        logger.info("Loaded per-sensor color maps for %d sensors",
+                     len(self.sensor_color_maps))
 
     def read_raw(self, channel):
         """Read raw RGBC values from a single sensor channel.
@@ -92,18 +96,23 @@ class SensorService:
             round(1000.0 * b / total)
         )
 
-    def classify_color(self, r, g, b, c):
-        """Map normalized RGB to the nearest calibrated color name.
+    def classify_color(self, r, g, b, c, channel):
+        """Map normalized RGB to the nearest calibrated color for this sensor.
 
-        Returns (color_name, color_index). "None" is treated as a calibrated
-        color (empty slot signature) just like any ligand color.
+        Uses the per-sensor color map so each sensor's unique characteristics
+        (LED brightness, mounting distance, photodiode variation) are accounted for.
+        Returns (color_name, color_index).
         """
+        color_map = self.sensor_color_maps.get(channel, {})
+        if not color_map:
+            return ("None", COLOR_NONE)
+
         nr, ng, nb = self.normalize_rgb(r, g, b)
 
         best_name = "None"
         best_dist = float("inf")
 
-        for name, (ref_r, ref_g, ref_b) in self.color_map.items():
+        for name, (ref_r, ref_g, ref_b) in color_map.items():
             dist = math.sqrt(
                 (nr - ref_r) ** 2 +
                 (ng - ref_g) ** 2 +
@@ -138,7 +147,7 @@ class SensorService:
                 continue
 
             r, g, b, c = reading
-            name, index = self.classify_color(r, g, b, c)
+            name, index = self.classify_color(r, g, b, c, ch)
 
             ligand_positions.append(index)
             color_names.append(name)

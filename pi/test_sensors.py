@@ -57,7 +57,7 @@ def main():
                     print(f"Channel {ch}: NO SENSOR")
                 else:
                     r, g, b, c = raw
-                    name, idx = service.classify_color(r, g, b, c)
+                    name, idx = service.classify_color(r, g, b, c, ch)
                     if args.raw:
                         print(f"Channel {ch}: {name} (idx={idx})  "
                               f"Raw: R={r} G={g} B={b} C={c}")
