@@ -1,8 +1,8 @@
 """I2C sensor service for reading 6 APDS-9960 color sensors via TCA9548A multiplexer.
 
 Each sensor reads the color of one ligand slot on the physical nanoparticle model.
-Proximity detects whether a ligand is present; RGB+Clear values are mapped to the
-nearest known ligand color using Euclidean distance.
+Proximity is used as a hint for empty slot detection when available; color matching
+uses 4D Euclidean distance (normalized R, G, B + normalized Clear).
 """
 
 import json
@@ -29,7 +29,7 @@ class SensorService:
         self.i2c = None
         self.mux = None
         self.sensors = []
-        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, c)}}
+        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, nc)}}
         self.proximity_thresholds = {}  # {channel: int}
 
     def initialize(self):
@@ -69,7 +69,7 @@ class SensorService:
             self.sensor_color_maps[ch] = {}
             for name, rgb in colors.items():
                 self.sensor_color_maps[ch][name] = (
-                    rgb["r"], rgb["g"], rgb["b"], rgb.get("c", 0)
+                    rgb["r"], rgb["g"], rgb["b"], rgb.get("nc", 0)
                 )
 
         self.proximity_thresholds = {}
@@ -108,18 +108,6 @@ class SensorService:
             logger.error("Error reading proximity channel %d: %s", channel, e)
             return None
 
-    def is_slot_empty(self, channel):
-        """Use proximity to detect whether a ligand is present in the slot."""
-        threshold = self.proximity_thresholds.get(channel)
-        if threshold is None:
-            return False
-
-        prox = self.read_proximity(channel)
-        if prox is None:
-            return True
-
-        return prox < threshold
-
     def normalize_rgb(self, r, g, b):
         """Normalize raw RGB to ratios using the RGB sum.
 
@@ -136,31 +124,48 @@ class SensorService:
             round(1000.0 * b / total)
         )
 
-    def classify_color(self, r, g, b, c, channel):
-        """Map normalized RGB+Clear to the nearest calibrated color for this sensor.
+    def normalize_clear(self, r, g, b, c):
+        """Normalize clear channel relative to RGB sum, scaled to 0-1000.
 
-        Uses proximity to detect empty slots, then 4D Euclidean distance
-        (normalized R, G, B + clear channel) for color matching.
+        This captures how much light passes through vs. how much is
+        color-filtered, on the same scale as normalized RGB.
+        """
+        total = r + g + b
+        if total == 0:
+            return 0
+        return round(1000.0 * c / total)
+
+    def classify_color(self, r, g, b, c, channel):
+        """Map normalized RGBC to the nearest calibrated color for this sensor.
+
+        Uses proximity as a confident "empty" signal when well below threshold.
+        Falls back to 4D color matching (including "None" as a calibrated color)
+        so materials that don't reflect IR (e.g. green) still get classified.
         Returns (color_name, color_index).
         """
-        if self.is_slot_empty(channel):
-            return ("None", COLOR_NONE)
+        # Use proximity only when confidently empty (well below threshold)
+        threshold = self.proximity_thresholds.get(channel)
+        if threshold is not None:
+            prox = self.read_proximity(channel)
+            if prox is not None and prox < threshold * 0.5:
+                return ("None", COLOR_NONE)
 
         color_map = self.sensor_color_maps.get(channel, {})
         if not color_map:
             return ("None", COLOR_NONE)
 
         nr, ng, nb = self.normalize_rgb(r, g, b)
+        nc = self.normalize_clear(r, g, b, c)
 
         best_name = "None"
         best_dist = float("inf")
 
-        for name, (ref_r, ref_g, ref_b, ref_c) in color_map.items():
+        for name, (ref_r, ref_g, ref_b, ref_nc) in color_map.items():
             dist = math.sqrt(
                 (nr - ref_r) ** 2 +
                 (ng - ref_g) ** 2 +
                 (nb - ref_b) ** 2 +
-                (c - ref_c) ** 2
+                (nc - ref_nc) ** 2
             )
             if dist < best_dist:
                 best_dist = dist

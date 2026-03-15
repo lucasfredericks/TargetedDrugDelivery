@@ -4,7 +4,9 @@ Run this script interactively on the Pi to calibrate RGB reference values
 for each ligand color. For each color, place that ligand under ALL sensors,
 then readings are taken and stored per-sensor to color_map.json.
 
-Proximity is used to detect empty slots, so only ligand colors are calibrated.
+Empty slots ("None") are also calibrated as a color. Proximity is calibrated
+as an additional hint for empty detection, but color matching handles the
+case where some materials don't reflect IR well.
 
 Usage:
     python color_calibration.py
@@ -60,7 +62,7 @@ def calibrate():
     service = SensorService()
     service.initialize()
 
-    # Per-sensor calibration: sensors[ch][color_name] = {r, g, b, c}
+    # Per-sensor calibration: sensors[ch][color_name] = {r, g, b, nc}
     sensor_maps = {ch: {} for ch in range(NUM_SENSORS)}
 
     for color_name in LIGAND_COLORS:
@@ -75,46 +77,48 @@ def calibrate():
 
             avg_r, avg_g, avg_b, avg_c = avg
             nr, ng, nb = service.normalize_rgb(avg_r, avg_g, avg_b)
-            sensor_maps[ch][color_name] = {"r": nr, "g": ng, "b": nb, "c": round(avg_c)}
+            nc = service.normalize_clear(avg_r, avg_g, avg_b, avg_c)
+            sensor_maps[ch][color_name] = {"r": nr, "g": ng, "b": nb, "nc": nc}
             print(f" done. Raw RGBC: ({avg_r:.0f}, {avg_g:.0f}, {avg_b:.0f}, {avg_c:.0f})"
-                  f"  Normalized: ({nr}, {ng}, {nb})")
+                  f"  Normalized: ({nr}, {ng}, {nb}, {nc})")
 
-    # Calibrate proximity threshold for empty slot detection
+    # Calibrate "None" (empty slot) per sensor as a color
     input("\nRemove all ligands (empty slots) and press Enter...")
-    proximity_thresholds = {}
 
-    print("\n  Reading empty slot proximity values...")
     empty_proxs = {}
     for ch in range(NUM_SENSORS):
         print(f"  Reading empty sensor {ch}...", end="", flush=True)
+        avg = read_sensor_avg(service, ch)
         prox = read_proximity_avg(service, ch)
+        if avg is None:
+            print(" ERROR: no readings.")
+            continue
+
+        avg_r, avg_g, avg_b, avg_c = avg
+        nr, ng, nb = service.normalize_rgb(avg_r, avg_g, avg_b)
+        nc = service.normalize_clear(avg_r, avg_g, avg_b, avg_c)
+        sensor_maps[ch]["None"] = {"r": nr, "g": ng, "b": nb, "nc": nc}
+
         if prox is not None:
             empty_proxs[ch] = prox
-            print(f" done. Proximity: {prox:.1f}")
-        else:
-            print(" ERROR: no readings.")
 
+        print(f" done. Normalized: ({nr}, {ng}, {nb}, {nc})  Prox: {prox}")
+
+    # Calibrate proximity thresholds
     input("\nPlace any ligand under ALL sensors and press Enter...")
     print("\n  Reading filled slot proximity values...")
-    filled_proxs = {}
+    proximity_thresholds = {}
     for ch in range(NUM_SENSORS):
         print(f"  Reading sensor {ch}...", end="", flush=True)
         prox = read_proximity_avg(service, ch)
-        if prox is not None:
-            filled_proxs[ch] = prox
-            print(f" done. Proximity: {prox:.1f}")
-        else:
-            print(" ERROR: no readings.")
-
-    # Set threshold at midpoint between empty and filled proximity readings
-    for ch in range(NUM_SENSORS):
-        if ch in empty_proxs and ch in filled_proxs:
+        if prox is not None and ch in empty_proxs:
             proximity_thresholds[ch] = round(
-                (empty_proxs[ch] + filled_proxs[ch]) / 2
+                (empty_proxs[ch] + prox) / 2
             )
-            print(f"  Sensor {ch}: empty={empty_proxs[ch]:.0f}, "
-                  f"filled={filled_proxs[ch]:.0f}, "
-                  f"threshold={proximity_thresholds[ch]}")
+            print(f" done. Prox: {prox:.1f}  "
+                  f"(empty={empty_proxs[ch]:.0f}, threshold={proximity_thresholds[ch]})")
+        else:
+            print(f" done. Prox: {prox}")
 
     # Save
     color_map = {
@@ -130,8 +134,8 @@ def calibrate():
     print("\nCalibrated values per sensor:")
     for ch in range(NUM_SENSORS):
         print(f"\n  Sensor {ch}:")
-        for name, rgb in sensor_maps[ch].items():
-            print(f"    {name}: R={rgb['r']}, G={rgb['g']}, B={rgb['b']}, C={rgb['c']}")
+        for name, vals in sensor_maps[ch].items():
+            print(f"    {name}: R={vals['r']}, G={vals['g']}, B={vals['b']}, NC={vals['nc']}")
 
 
 if __name__ == "__main__":
