@@ -14,7 +14,7 @@ NUM_SENSORS = 6
 
 # APDS-9960 color sensing settings
 # color_gain: 0=1x, 1=4x, 2=16x, 3=64x
-COLOR_GAIN = 2  # 16x
+COLOR_GAIN = 1  # 4x
 # color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
 COLOR_INTEGRATION_TIME = 256
 
