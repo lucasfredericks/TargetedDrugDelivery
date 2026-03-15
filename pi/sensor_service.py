@@ -1,9 +1,8 @@
 """I2C sensor service for reading 6 APDS-9960 color sensors via TCA9548A multiplexer.
 
 Each sensor reads the color of one ligand slot on the physical nanoparticle model.
-Proximity is used as a hint for empty slot detection when available; color matching
-normalizes RGB by the clear channel for lighting resilience while preserving color
-information.
+Color matching uses 4D Euclidean distance: clear-normalized RGB for hue plus
+scaled raw clear for brightness. Proximity is used as a hint for empty detection.
 """
 
 import json
@@ -30,8 +29,9 @@ class SensorService:
         self.i2c = None
         self.mux = None
         self.sensors = []
-        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b)}}
+        self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, sc)}}
         self.proximity_thresholds = {}  # {channel: int}
+        self.clear_max = {}  # {channel: int} for scaling raw clear to 0-1000
 
     def initialize(self):
         """Set up I2C bus, multiplexer, and all 6 sensors."""
@@ -65,12 +65,16 @@ class SensorService:
                            "run color_calibration.py to generate it")
             return
 
+        self.clear_max = {}
+        for ch_str, val in data.get("clear_max", {}).items():
+            self.clear_max[int(ch_str)] = val
+
         for ch_str, colors in data["sensors"].items():
             ch = int(ch_str)
             self.sensor_color_maps[ch] = {}
             for name, vals in colors.items():
                 self.sensor_color_maps[ch][name] = (
-                    vals["r"], vals["g"], vals["b"]
+                    vals["r"], vals["g"], vals["b"], vals.get("sc", 0)
                 )
 
         self.proximity_thresholds = {}
@@ -124,12 +128,19 @@ class SensorService:
             round(1000.0 * b / c)
         )
 
-    def classify_color(self, r, g, b, c, channel):
-        """Map clear-normalized RGB to the nearest calibrated color.
+    def scale_clear(self, c, channel):
+        """Scale raw clear channel to 0-1000 using per-sensor max from calibration."""
+        max_c = self.clear_max.get(channel, 1)
+        if max_c == 0:
+            return 0
+        return round(1000.0 * c / max_c)
 
-        Uses proximity as a confident "empty" signal when well below threshold.
-        Falls back to 3D color matching (including "None" as a calibrated color)
-        so materials that don't reflect IR (e.g. green) still get classified.
+    def classify_color(self, r, g, b, c, channel):
+        """Map reading to the nearest calibrated color using 4D distance.
+
+        Uses clear-normalized RGB (hue) + scaled raw clear (brightness).
+        Hue separates Blue/Green; brightness separates Red/Orange.
+        Proximity provides a confident "empty" shortcut when available.
         Returns (color_name, color_index).
         """
         # Use proximity only when confidently empty (well below threshold)
@@ -144,15 +155,17 @@ class SensorService:
             return ("None", COLOR_NONE)
 
         nr, ng, nb = self.normalize_by_clear(r, g, b, c)
+        sc = self.scale_clear(c, channel)
 
         best_name = "None"
         best_dist = float("inf")
 
-        for name, (ref_r, ref_g, ref_b) in color_map.items():
+        for name, (ref_r, ref_g, ref_b, ref_sc) in color_map.items():
             dist = math.sqrt(
                 (nr - ref_r) ** 2 +
                 (ng - ref_g) ** 2 +
-                (nb - ref_b) ** 2
+                (nb - ref_b) ** 2 +
+                (sc - ref_sc) ** 2
             )
             if dist < best_dist:
                 best_dist = dist
