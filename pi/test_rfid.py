@@ -53,6 +53,17 @@ def verbose_diagnostics(service):
         return
 
     mfrc = reader.reader  # The underlying MFRC522 instance
+
+    # Detect which method name the library uses (original vs Pi 5 fork)
+    if hasattr(mfrc, 'read_mfrc522'):
+        read_reg = mfrc.read_mfrc522
+    elif hasattr(mfrc, 'Read_MFRC522'):
+        read_reg = mfrc.Read_MFRC522
+    else:
+        print(f"\nCannot read registers — unknown MFRC522 API.")
+        print(f"  Available methods: {[m for m in dir(mfrc) if not m.startswith('_')]}")
+        return
+
     print(f"\nMFRC522 register dump:")
 
     try:
@@ -81,7 +92,7 @@ def verbose_diagnostics(service):
         all_zero = True
         all_ff = True
         for addr, name in reg_names.items():
-            val = mfrc.Read_MFRC522(addr)
+            val = read_reg(addr)
             print(f"  0x{addr:02X} {name:20s} = 0x{val:02X} ({val:3d})")
             if val != 0x00:
                 all_zero = False
@@ -97,7 +108,7 @@ def verbose_diagnostics(service):
             print("  WARNING: All registers read 0xFF — SPI bus floating.")
             print("           MISO line may be disconnected or chip not powered.")
         else:
-            version = mfrc.Read_MFRC522(0x37)
+            version = read_reg(0x37)
             if version == 0x91:
                 print("  Chip version: MFRC522 v1.0 (expected)")
             elif version == 0x92:
@@ -108,7 +119,7 @@ def verbose_diagnostics(service):
                 print(f"  Chip version: 0x{version:02X} (unexpected — may be a different chip)")
 
         # Check antenna status (TxControlReg bits 0-1 enable antenna)
-        tx_control = mfrc.Read_MFRC522(0x14)
+        tx_control = read_reg(0x14)
         antenna_on = (tx_control & 0x03) == 0x03
         print(f"  Antenna:     {'ON' if antenna_on else 'OFF'} (TxControlReg=0x{tx_control:02X})")
         if not antenna_on:
@@ -116,7 +127,7 @@ def verbose_diagnostics(service):
             print("           This usually means initialization did not complete properly.")
 
         # Check for errors
-        error_reg = mfrc.Read_MFRC522(0x06)
+        error_reg = read_reg(0x06)
         if error_reg:
             errors = []
             if error_reg & 0x01: errors.append("ProtocolErr")
