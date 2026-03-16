@@ -43,10 +43,13 @@ DEFAULT_TOXICITY = 2
 # Stats update interval from clients (ms)
 STATS_INTERVAL_MS = 800
 
-# RFID (MFRC522 via SPI)
-RFID_RST_PIN = 6        # GPIO 6 (D6 on Qwiic pHAT)
-RFID_SPI_BUS = 0        # SPI0
-RFID_SPI_DEVICE = 0     # CE0 (CS pin on Qwiic pHAT)
+# RFID (MFRC522 via SPI1 — SPI0 pins damaged)
+# SPI1 pins: MISO=GPIO19 (pin 35), MOSI=GPIO20 (pin 38),
+#            SCLK=GPIO21 (pin 40), CE0=GPIO18 (pin 12)
+# Requires dtoverlay=spi1-1cs in /boot/firmware/config.txt
+RFID_RST_PIN = 6        # GPIO 6 (pin 31)
+RFID_SPI_BUS = 1        # SPI1
+RFID_SPI_DEVICE = 0     # CE0 (GPIO 18, pin 12)
 
 # GPIO pin assignments (BCM numbering)
 GPIO_BUTTON_SCAN = 17
