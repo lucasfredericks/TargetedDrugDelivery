@@ -43,15 +43,17 @@ DEFAULT_TOXICITY = 2
 # Stats update interval from clients (ms)
 STATS_INTERVAL_MS = 800
 
-# RFID (MFRC522 via SPI1 — SPI0 pins damaged)
-# SPI1 pins: MISO=GPIO19 (pin 35), MOSI=GPIO20 (pin 38),
-#            SCLK=GPIO21 (pin 40), CE0=GPIO18 (pin 12)
-# Requires dtoverlay=spi1-1cs in /boot/firmware/config.txt
-RFID_RST_PIN = 6        # GPIO 6 (pin 31)
-RFID_SPI_BUS = 1        # SPI1
-RFID_SPI_DEVICE = 0     # CE0 (GPIO 18, pin 12)
+# Arduino serial connection (replaces direct GPIO/I2C/SPI hardware access)
+SERIAL_PORT = "/dev/ttyUSB0"   # Arduino USB serial (ttyACM0 for Mega/Uno native USB)
+SERIAL_BAUD = 115200
+SERIAL_TIMEOUT = 2             # seconds
 
-# GPIO pin assignments (BCM numbering)
+# Legacy: RFID (MFRC522 via SPI — only used when running without Arduino)
+RFID_RST_PIN = 6
+RFID_SPI_BUS = 0
+RFID_SPI_DEVICE = 0
+
+# Legacy: GPIO buttons (only used when running without Arduino)
 GPIO_BUTTON_SCAN = 17
 GPIO_BUTTON_TEST = 27
 GPIO_BUTTON_RESET = 22

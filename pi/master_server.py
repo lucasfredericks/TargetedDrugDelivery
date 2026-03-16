@@ -1,17 +1,15 @@
 """Master server for the Targeted Drug Delivery exhibit.
 
-Runs on the Raspberry Pi. Coordinates:
-  - I2C color sensors (nanoparticle scanning)
-  - RFID reader (puzzle loading)
-  - GPIO buttons (user input)
-  - Socket.IO hub (client simulation computers)
-  - Results display (local Chromium browser)
+Coordinates hardware I/O, simulation clients, and the results display.
+Hardware can be accessed in two modes:
+  - Arduino mode (default): All I/O via Arduino over USB serial
+  - Legacy Pi mode: Direct GPIO/I2C/SPI on Raspberry Pi
 
 Usage:
-    python master_server.py
-    python master_server.py --no-gpio    # Skip GPIO init (for testing without Pi hardware)
-    python master_server.py --no-sensors # Skip sensor init
-    python master_server.py --no-rfid    # Skip RFID init
+    python master_server.py                    # Arduino mode (default)
+    python master_server.py --serial /dev/ttyACM0  # Arduino on specific port
+    python master_server.py --legacy           # Legacy Pi GPIO/I2C/SPI mode
+    python master_server.py --no-hardware      # No hardware (display/network only)
 """
 
 import argparse
@@ -40,10 +38,11 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 state_machine = ExhibitStateMachine()
 client_manager = ClientManager()
 
-# Optional hardware services (initialized based on CLI flags)
+# Optional hardware services (initialized based on CLI flags / mode)
 sensor_service = None
 rfid_service = None
 gpio_input = None
+serial_service = None  # Arduino serial bridge (replaces above three when active)
 
 
 # --- HTTP Routes ---
@@ -133,11 +132,12 @@ def handle_join_display():
 
 def action_scan_nanoparticle():
     """Read color sensors and update nanoparticle state."""
-    if sensor_service is None:
+    svc = serial_service or sensor_service
+    if svc is None:
         logger.warning("Sensor service not available")
         return
 
-    result = sensor_service.read_all()
+    result = svc.read_all()
     positions = result["ligandPositions"]
     colors = result["colors"]
 
@@ -152,11 +152,12 @@ def action_scan_nanoparticle():
 
 def action_scan_rfid():
     """Read RFID tag and load puzzle config."""
-    if rfid_service is None:
+    svc = serial_service or rfid_service
+    if svc is None:
         logger.warning("RFID service not available")
         return
 
-    puzzle_id, puzzle = rfid_service.scan_and_load()
+    puzzle_id, puzzle = svc.scan_and_load()
     if puzzle is None:
         _emit_to_display("error", {"message": f"Unknown puzzle tag: {puzzle_id}"})
         return
@@ -249,47 +250,96 @@ def _emit_to_display(event, data):
 # --- Main ---
 
 def main():
-    global sensor_service, rfid_service, gpio_input
+    global sensor_service, rfid_service, gpio_input, serial_service
 
     parser = argparse.ArgumentParser(description="TDD Exhibit Master Server")
-    parser.add_argument("--no-gpio", action="store_true", help="Skip GPIO initialization")
-    parser.add_argument("--no-sensors", action="store_true", help="Skip sensor initialization")
-    parser.add_argument("--no-rfid", action="store_true", help="Skip RFID initialization")
+    parser.add_argument("--serial", nargs="?", const="auto",
+                        help="Arduino serial port (default: auto-detect)")
+    parser.add_argument("--legacy", action="store_true",
+                        help="Use legacy Pi GPIO/I2C/SPI mode instead of Arduino")
+    parser.add_argument("--no-hardware", action="store_true",
+                        help="Skip all hardware initialization")
+    # Legacy flags (still supported for backwards compat)
+    parser.add_argument("--no-gpio", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-sensors", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-rfid", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    # Initialize hardware services
-    if not args.no_sensors:
-        try:
-            from sensor_service import SensorService
-            sensor_service = SensorService()
-            sensor_service.initialize()
-            logger.info("Sensor service ready")
-        except Exception as e:
-            logger.error("Sensor init failed (use --no-sensors to skip): %s", e)
+    if args.no_hardware:
+        logger.info("Running without hardware (display/network only)")
 
-    if not args.no_rfid:
-        try:
-            from rfid_service import RFIDService
-            rfid_service = RFIDService()
-            rfid_service.initialize()
-            logger.info("RFID service ready")
-        except Exception as e:
-            logger.error("RFID init failed (use --no-rfid to skip): %s", e)
+    elif args.legacy:
+        # Legacy Pi mode: direct hardware access
+        logger.info("Using legacy Pi hardware mode")
 
-    if not args.no_gpio:
-        try:
-            from gpio_input import GPIOInput
-            gpio_input = GPIOInput()
-            gpio_input.initialize()
-            gpio_input.on_scan(action_scan_nanoparticle)
-            gpio_input.on_test(action_start_test)
-            gpio_input.on_reset(action_reset)
-            logger.info("GPIO input ready")
-        except Exception as e:
-            logger.error("GPIO init failed (use --no-gpio to skip): %s", e)
+        if not args.no_sensors:
+            try:
+                from sensor_service import SensorService
+                sensor_service = SensorService()
+                sensor_service.initialize()
+                logger.info("Sensor service ready")
+            except Exception as e:
+                logger.error("Sensor init failed: %s", e)
+
+        if not args.no_rfid:
+            try:
+                from rfid_service import RFIDService
+                rfid_service = RFIDService()
+                rfid_service.initialize()
+                logger.info("RFID service ready")
+            except Exception as e:
+                logger.error("RFID init failed: %s", e)
+
+        if not args.no_gpio:
+            try:
+                from gpio_input import GPIOInput
+                gpio_input = GPIOInput()
+                gpio_input.initialize()
+                gpio_input.on_scan(action_scan_nanoparticle)
+                gpio_input.on_test(action_start_test)
+                gpio_input.on_reset(action_reset)
+                logger.info("GPIO input ready")
+            except Exception as e:
+                logger.error("GPIO init failed: %s", e)
+
+    else:
+        # Arduino serial mode (default)
+        from serial_service import SerialService
+        from config import SERIAL_PORT
+
+        port = SERIAL_PORT if args.serial in (None, "auto") else args.serial
+        if args.serial == "auto":
+            port = _detect_arduino() or SERIAL_PORT
+
+        logger.info("Using Arduino serial mode on %s", port)
+        serial_service = SerialService(port=port)
+        serial_service.initialize()
+
+        if serial_service.ser is None:
+            logger.error("Arduino not connected. Use --no-hardware or --legacy.")
+            return
+
+        # Register button callbacks
+        serial_service.on_scan(action_scan_nanoparticle)
+        serial_service.on_test(action_start_test)
+        serial_service.on_reset(action_reset)
 
     logger.info("Starting master server on %s:%d", SERVER_HOST, SERVER_PORT)
     socketio.run(app, host=SERVER_HOST, port=SERVER_PORT)
+
+
+def _detect_arduino():
+    """Try to auto-detect Arduino serial port."""
+    import glob
+    candidates = (
+        glob.glob("/dev/ttyACM*") +
+        glob.glob("/dev/ttyUSB*") +
+        glob.glob("COM*")
+    )
+    if candidates:
+        logger.info("Auto-detected serial port: %s", candidates[0])
+        return candidates[0]
+    return None
 
 
 if __name__ == "__main__":
