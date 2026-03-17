@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TDD Admin — Tag Manager</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0a0a1a;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #111128;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #2a2a4a;
+        }
+
+        header h1 { font-size: 1.4em; color: #8888ff; }
+
+        .badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            background: #2a3a5a;
+            color: #6af;
+        }
+
+        main {
+            max-width: 960px;
+            margin: 24px auto;
+            padding: 0 24px 40px;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .card {
+            background: #141428;
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .card h2 {
+            font-size: 0.85em;
+            color: #8888cc;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+
+        /* Tag scanner */
+        .tag-display {
+            background: #1a1a30;
+            border-radius: 6px;
+            padding: 20px 16px;
+            text-align: center;
+            min-height: 90px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .tag-uid {
+            font-family: monospace;
+            font-size: 1.5em;
+            color: #6af;
+            word-break: break-all;
+        }
+
+        .tag-waiting { color: #555; font-size: 1em; }
+
+        .tag-status { font-size: 0.8em; }
+        .tag-present { color: #6f6; }
+        .tag-removed { color: #888; }
+
+        .conn-status {
+            font-size: 0.8em;
+            color: #555;
+            text-align: center;
+        }
+
+        /* Puzzle list */
+        .puzzle-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .puzzle-option {
+            padding: 9px 12px;
+            background: #1a1a30;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-family: monospace;
+            border: 2px solid transparent;
+            transition: border-color 0.15s, color 0.15s;
+        }
+
+        .puzzle-option:hover { border-color: #3a3a5a; }
+        .puzzle-option.selected { border-color: #4a7acc; color: #6af; }
+
+        /* Associate row */
+        .associate-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: bold;
+            white-space: nowrap;
+            transition: opacity 0.15s, background 0.15s;
+        }
+
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .btn-primary { background: #2a5aaa; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #3a6abb; }
+
+        .btn-danger {
+            background: #551111;
+            color: #f99;
+            padding: 6px 14px;
+            font-size: 0.85em;
+        }
+        .btn-danger:hover { background: #771111; }
+
+        .associate-hint { color: #666; font-size: 0.85em; }
+
+        /* Mappings table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            color: #8888cc;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #1a1a30;
+            vertical-align: middle;
+        }
+
+        .uid-cell { font-family: monospace; color: #aac; }
+        .puzzle-cell { color: #8af; }
+        .empty-cell { text-align: center; color: #555; padding: 28px 12px; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            pointer-events: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .toast-success { background: #1a4a1a; color: #6f6; border: 1px solid #2a6a2a; }
+        .toast-error   { background: #441111; color: #f66; border: 1px solid #661111; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Targeted Drug Delivery</h1>
+    <span class="badge">Admin — Tag Manager</span>
+</header>
+
+<main>
+    <div class="row">
+
+        <!-- Tag Scanner -->
+        <div class="card">
+            <h2>RFID Scanner</h2>
+            <div class="tag-display" id="tag-display">
+                <span class="tag-waiting">Waiting for tag...</span>
+            </div>
+            <div class="conn-status" id="conn-status">Connecting to server...</div>
+        </div>
+
+        <!-- Puzzle Files -->
+        <div class="card">
+            <h2>Puzzle Files</h2>
+            <div class="puzzle-list" id="puzzle-list">
+                <div style="color:#555;font-size:0.9em;">Loading...</div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Associate Action -->
+    <div class="associate-row">
+        <button class="btn btn-primary" id="associate-btn" disabled>
+            Associate Tag → Puzzle
+        </button>
+        <span class="associate-hint" id="associate-hint">
+            Scan a tag and select a puzzle to associate them.
+        </span>
+    </div>
+
+    <!-- Current Mappings -->
+    <div class="card">
+        <h2>Current Mappings</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tag UID</th>
+                    <th>Puzzle File</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="mappings-body">
+                <tr><td colspan="3" class="empty-cell">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+    let currentUID = null;
+    let tagPresent = false;
+    let selectedPuzzle = null;
+
+    // --- Socket.IO ---
+
+    const socket = io();
+
+    socket.on("connect", () => {
+        socket.emit("join_admin");
+        setConnStatus("Connected", "#6a6");
+    });
+
+    socket.on("disconnect", () => {
+        setConnStatus("Disconnected", "#a44");
+    });
+
+    socket.on("admin_state", (data) => {
+        if (data.current_tag) {
+            setTag(data.current_tag, true);
+        }
+    });
+
+    socket.on("admin_tag", (data) => {
+        setTag(data.uid, true);
+    });
+
+    socket.on("admin_tag_removed", () => {
+        tagPresent = false;
+        if (currentUID) {
+            document.getElementById("tag-display").innerHTML =
+                `<span class="tag-uid">${currentUID}</span>` +
+                `<span class="tag-status tag-removed">Tag removed — UID captured</span>`;
+        }
+    });
+
+    function setConnStatus(text, color) {
+        const el = document.getElementById("conn-status");
+        el.textContent = text;
+        el.style.color = color;
+    }
+
+    function setTag(uid, present) {
+        currentUID = uid;
+        tagPresent = present;
+        document.getElementById("tag-display").innerHTML =
+            `<span class="tag-uid">${uid}</span>` +
+            `<span class="tag-status tag-present">Tag present</span>`;
+        updateAssocBtn();
+    }
+
+    // --- Puzzle selection ---
+
+    function updateAssocBtn() {
+        const btn = document.getElementById("associate-btn");
+        const hint = document.getElementById("associate-hint");
+        btn.disabled = !(currentUID && selectedPuzzle);
+        if (!currentUID && !selectedPuzzle) {
+            hint.textContent = "Scan a tag and select a puzzle to associate them.";
+        } else if (!currentUID) {
+            hint.textContent = "Scan an RFID tag.";
+        } else if (!selectedPuzzle) {
+            hint.textContent = "Select a puzzle file.";
+        } else {
+            hint.textContent = `Will map  ${currentUID}  →  ${selectedPuzzle}`;
+        }
+    }
+
+    async function loadPuzzles() {
+        const res = await fetch("/admin/api/puzzles");
+        const files = await res.json();
+        const list = document.getElementById("puzzle-list");
+        if (files.length === 0) {
+            list.innerHTML = '<div style="color:#555;font-size:0.9em;">No puzzle files found in puzzles/</div>';
+            return;
+        }
+        list.innerHTML = "";
+        files.forEach(f => {
+            const el = document.createElement("div");
+            el.className = "puzzle-option";
+            el.textContent = f;
+            el.addEventListener("click", () => {
+                document.querySelectorAll(".puzzle-option").forEach(o => o.classList.remove("selected"));
+                el.classList.add("selected");
+                selectedPuzzle = f;
+                updateAssocBtn();
+            });
+            list.appendChild(el);
+        });
+    }
+
+    // --- Mappings table ---
+
+    async function loadMappings() {
+        const res = await fetch("/admin/api/tags");
+        const mappings = await res.json();
+        const tbody = document.getElementById("mappings-body");
+        const entries = Object.entries(mappings);
+        if (entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="empty-cell">No mappings yet</td></tr>';
+            return;
+        }
+        tbody.innerHTML = entries.map(([uid, puzzle]) =>
+            `<tr>
+                <td class="uid-cell">${uid}</td>
+                <td class="puzzle-cell">${puzzle}</td>
+                <td><button class="btn btn-danger" onclick="deleteTag(this, ${JSON.stringify(uid)})">Remove</button></td>
+            </tr>`
+        ).join("");
+    }
+
+    // --- Associate ---
+
+    document.getElementById("associate-btn").addEventListener("click", async () => {
+        if (!currentUID || !selectedPuzzle) return;
+        const res = await fetch("/admin/api/tags", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({uid: currentUID, puzzle: selectedPuzzle})
+        });
+        const data = await res.json();
+        if (data.ok) {
+            showToast(`Mapped  ${currentUID}  →  ${selectedPuzzle}`, "success");
+            loadMappings();
+        } else {
+            showToast(data.error || "Error saving mapping", "error");
+        }
+    });
+
+    async function deleteTag(btn, uid) {
+        btn.disabled = true;
+        const res = await fetch("/admin/api/tags/" + encodeURIComponent(uid), {method: "DELETE"});
+        const data = await res.json();
+        if (data.ok) {
+            showToast(`Removed mapping for  ${uid}`, "success");
+            loadMappings();
+        } else {
+            showToast(data.error || "Error removing mapping", "error");
+            btn.disabled = false;
+        }
+    }
+
+    // --- Toast ---
+
+    function showToast(msg, type) {
+        const existing = document.querySelector(".toast");
+        if (existing) existing.remove();
+        const el = document.createElement("div");
+        el.className = `toast toast-${type}`;
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => el && el.remove(), 3500);
+    }
+
+    // --- Init ---
+    loadPuzzles();
+    loadMappings();
+</script>
+
+</body>
+</html>

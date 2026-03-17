@@ -175,6 +175,10 @@ class ArduinoRFIDService:
 
     # --- Puzzle lookup (same interface as RFIDService) ---
 
+    def reload_puzzle_index(self):
+        """Reload tag UID → puzzle mapping from disk (call after index.json is updated)."""
+        self._load_puzzle_index()
+
     def _load_puzzle_index(self):
         """Load tag UID → puzzle file mapping."""
         if not os.path.exists(PUZZLES_INDEX_PATH):

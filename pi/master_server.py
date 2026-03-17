@@ -11,10 +11,12 @@ Usage:
 """
 
 import argparse
+import json as _json
 import logging
+import os
 import sys
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 
 from config import SERVER_HOST, SERVER_PORT, DEFAULT_PARTICLE_COUNT, DEFAULT_TOXICITY
@@ -56,6 +58,79 @@ def status():
         **state_machine.get_status(),
         "clients": client_manager.count
     })
+
+
+# --- Admin Routes ---
+
+@app.route("/admin")
+def admin():
+    """Tag-to-puzzle mapping admin page."""
+    return render_template("admin.html")
+
+
+@app.route("/admin/api/puzzles")
+def admin_list_puzzles():
+    """List available puzzle JSON files."""
+    import glob as _glob
+    from config import PUZZLES_DIR
+    files = sorted([
+        os.path.basename(f)
+        for f in _glob.glob(os.path.join(PUZZLES_DIR, "*.json"))
+        if os.path.basename(f) != "index.json"
+    ])
+    return jsonify(files)
+
+
+@app.route("/admin/api/tags", methods=["GET"])
+def admin_get_tags():
+    """Return current tag-to-puzzle mappings."""
+    raw = _load_puzzle_index_raw()
+    return jsonify({k: v for k, v in raw.items() if not k.startswith("_")})
+
+
+@app.route("/admin/api/tags", methods=["POST"])
+def admin_save_tag():
+    """Add or update a tag mapping. Body: {"uid": "...", "puzzle": "filename.json"}"""
+    data = request.get_json()
+    uid = (data.get("uid") or "").strip()
+    puzzle = (data.get("puzzle") or "").strip()
+    if not uid or not puzzle:
+        return jsonify({"error": "uid and puzzle required"}), 400
+    raw = _load_puzzle_index_raw()
+    mappings = {k: v for k, v in raw.items() if not k.startswith("_")}
+    mappings[uid] = puzzle
+    _save_puzzle_index(mappings)
+    if arduino_rfid:
+        arduino_rfid.reload_puzzle_index()
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/api/tags/<path:uid>", methods=["DELETE"])
+def admin_delete_tag(uid):
+    """Remove a tag mapping by UID."""
+    raw = _load_puzzle_index_raw()
+    mappings = {k: v for k, v in raw.items() if not k.startswith("_")}
+    if uid not in mappings:
+        return jsonify({"error": "not found"}), 404
+    del mappings[uid]
+    _save_puzzle_index(mappings)
+    if arduino_rfid:
+        arduino_rfid.reload_puzzle_index()
+    return jsonify({"ok": True})
+
+
+def _load_puzzle_index_raw():
+    from config import PUZZLES_INDEX_PATH
+    if not os.path.exists(PUZZLES_INDEX_PATH):
+        return {}
+    with open(PUZZLES_INDEX_PATH) as f:
+        return _json.load(f)
+
+
+def _save_puzzle_index(mappings):
+    from config import PUZZLES_INDEX_PATH
+    with open(PUZZLES_INDEX_PATH, "w") as f:
+        _json.dump(mappings, f, indent=2)
 
 
 # --- Socket.IO: Simulation Client Events ---
@@ -122,6 +197,18 @@ def handle_join_display():
     # Send current state
     emit("state_sync", state_machine.get_status())
     logger.info("Display joined")
+
+
+# --- Socket.IO: Admin Events ---
+
+@socketio.on("join_admin")
+def handle_join_admin():
+    """Admin page registers to receive live tag scan events."""
+    from flask_socketio import join_room
+    join_room("admin")
+    current = arduino_rfid.current_tag_uid if arduino_rfid else None
+    emit("admin_state", {"current_tag": current})
+    logger.info("Admin client joined")
 
 
 # --- Button Actions (called from GPIO or Socket.IO) ---
@@ -289,9 +376,16 @@ def main():
                 logger.error("Arduino not connected. Use --no-rfid to skip.")
                 arduino_rfid = None
             else:
-                # Tag detected → load puzzle
-                arduino_rfid.on_tag(lambda uid: action_scan_rfid())
-                # Start button → scan sensors then start test
+                # Tag detected → notify admin, then load puzzle
+                def _on_tag(uid):
+                    socketio.emit("admin_tag", {"uid": uid}, room="admin")
+                    action_scan_rfid()
+                arduino_rfid.on_tag(_on_tag)
+                # Tag removed → notify admin
+                arduino_rfid.on_tag_removed(
+                    lambda: socketio.emit("admin_tag_removed", {}, room="admin")
+                )
+                # Start button → start test
                 arduino_rfid.on_start(action_start_test)
                 logger.info("Arduino RFID/button ready")
 
