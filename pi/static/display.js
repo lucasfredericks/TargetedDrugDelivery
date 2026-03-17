@@ -103,52 +103,53 @@ function renderNanoparticle(positions, colorNames) {
     const ctx = canvas.getContext("2d");
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const radius = 50;
+    const hexR = Math.min(canvas.width, canvas.height) * 0.23; // hex vertex radius
+    const apothem = hexR * Math.cos(Math.PI / 6);              // center-to-face distance
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw central hexagon
+    // Draw 6 outward ligand triangles first (tip just inside hex face, base outward)
+    for (let i = 0; i < 6; i++) {
+        const mid = -Math.PI / 2 + (i + 0.5) * 2 * Math.PI / 6;
+        const triH = hexR * 0.95;
+        const halfBase = triH / Math.sqrt(3);
+        const tipX = cx + Math.cos(mid) * (apothem - 2);
+        const tipY = cy + Math.sin(mid) * (apothem - 2);
+        const baseCX = cx + Math.cos(mid) * (apothem - 2 + triH);
+        const baseCY = cy + Math.sin(mid) * (apothem - 2 + triH);
+        const px = Math.cos(mid + Math.PI / 2);
+        const py = Math.sin(mid + Math.PI / 2);
+
+        const colorIdx = positions[i];
+        const colorName = colorIdx >= 0 ? LIGAND_NAMES[colorIdx] : "None";
+
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(baseCX + px * halfBase, baseCY + py * halfBase);
+        ctx.lineTo(baseCX - px * halfBase, baseCY - py * halfBase);
+        ctx.closePath();
+        ctx.fillStyle = LIGAND_COLORS_HEX[colorName];
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.25)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    // Draw central hexagon on top — always yellow, covers triangle tips
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 2;
-        const x = cx + radius * 0.6 * Math.cos(angle);
-        const y = cy + radius * 0.6 * Math.sin(angle);
+        const angle = -Math.PI / 2 + i * 2 * Math.PI / 6;
+        const x = cx + Math.cos(angle) * hexR;
+        const y = cy + Math.sin(angle) * hexR;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.fillStyle = "#555";
+    ctx.fillStyle = "#f1c40f";
     ctx.fill();
     ctx.strokeStyle = "#888";
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-
-    // Draw 6 ligand triangles
-    for (let i = 0; i < 6; i++) {
-        const angle1 = (Math.PI / 3) * i - Math.PI / 2;
-        const angle2 = (Math.PI / 3) * ((i + 1) % 6) - Math.PI / 2;
-
-        const ix1 = cx + radius * 0.6 * Math.cos(angle1);
-        const iy1 = cy + radius * 0.6 * Math.sin(angle1);
-        const ix2 = cx + radius * 0.6 * Math.cos(angle2);
-        const iy2 = cy + radius * 0.6 * Math.sin(angle2);
-        const ox = cx + radius * Math.cos((angle1 + angle2) / 2);
-        const oy = cy + radius * Math.sin((angle1 + angle2) / 2);
-
-        ctx.beginPath();
-        ctx.moveTo(ix1, iy1);
-        ctx.lineTo(ox, oy);
-        ctx.lineTo(ix2, iy2);
-        ctx.closePath();
-
-        const colorIdx = positions[i];
-        const colorName = colorIdx >= 0 ? LIGAND_NAMES[colorIdx] : "None";
-        ctx.fillStyle = LIGAND_COLORS_HEX[colorName];
-        ctx.fill();
-        ctx.strokeStyle = "#888";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-    }
 
     // Update ligand list
     const listEl = document.getElementById("ligand-list");
