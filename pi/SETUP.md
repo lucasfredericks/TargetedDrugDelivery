@@ -1,34 +1,37 @@
-Raspberry Pi Setup Instructions
-================================
+Raspberry Pi + Arduino Setup Instructions
+==========================================
 
-This guide covers setting up a Raspberry Pi as the master controller for the
-Targeted Drug Delivery exhibit. The Pi reads physical inputs (color sensors,
-RFID tags, buttons), coordinates simulation clients over the network, and
-displays results on an attached monitor.
+This guide covers setting up the Targeted Drug Delivery exhibit hardware.
+The system uses two controllers:
+- **Raspberry Pi**: Reads color sensors (I2C), runs the master server,
+  and drives the results display
+- **Arduino Uno**: Reads RFID tags (PN532 shield) and a start button,
+  communicating with the Pi over USB serial
 
 
 Prerequisites
 -------------
 
 Hardware:
-- Raspberry Pi 4 (or 5) with Raspberry Pi OS (Bookworm or later)
+- Raspberry Pi 5 with Raspberry Pi OS (Bookworm or later)
 - MicroSD card (16 GB minimum)
 - Power supply (USB-C, 5V 3A)
 - HDMI cable + monitor (for results display)
 - Ethernet cable + unmanaged switch (for client network)
 - TCA9548A I2C multiplexer breakout
 - 6x Adafruit APDS-9960 color/proximity sensor breakouts
-- MFRC522 RFID reader module + RFID tags (NTAG213 or Mifare Classic)
-- 3x momentary push buttons (normally open)
+- Arduino Uno
+- Adafruit PN532 NFC/RFID Shield (product #789) + NFC tags
+- 1x momentary push button (normally open) — start button
 - Jumper wires, breadboard or perfboard
 
 Software:
 - Python 3.9 or later (pre-installed on Raspberry Pi OS)
-- pip (pre-installed)
+- Arduino IDE (for uploading firmware to the Uno)
 
 
-Step 1: Enable I2C and SPI
----------------------------
+Step 1: Enable I2C on the Pi
+-----------------------------
 
 Open the Raspberry Pi configuration tool:
 
@@ -36,7 +39,8 @@ Open the Raspberry Pi configuration tool:
 
 Navigate to Interface Options and enable:
 - I2C (for color sensors via TCA9548A)
-- SPI (for MFRC522 RFID reader)
+
+Note: SPI is NOT needed — RFID is handled by the Arduino.
 
 Reboot after enabling:
 
@@ -47,14 +51,9 @@ Verify I2C is enabled:
     ls /dev/i2c*
     # Should show /dev/i2c-1
 
-Verify SPI is enabled:
 
-    ls /dev/spidev*
-    # Should show /dev/spidev0.0 and /dev/spidev0.1
-
-
-Step 2: Wiring
---------------
+Step 2: Pi Wiring (Color Sensors)
+----------------------------------
 
 ### TCA9548A I2C Multiplexer
 
@@ -88,42 +87,66 @@ Each APDS-9960 also needs:
 All 6 sensors share the same I2C address (0x39), which is why the
 multiplexer is required.
 
-### MFRC522 RFID Reader (Sunfounder RC522)
 
-Using the Sparkfun Qwiic pHAT breakout pins:
+Step 3: Arduino Setup (RFID + Button)
+--------------------------------------
 
-    Qwiic pHAT          MFRC522
-    ----------           -------
-    CS   (GPIO 8)     -> SDA (chip select — labeled SDA on the module)
-    SCK  (GPIO 11)    -> SCK
-    MOSI (GPIO 10)    -> MOSI
-    MISO (GPIO 9)     -> MISO
-    D6   (GPIO 6)     -> RST
-    3.3V              -> 3.3V
-    GND               -> GND
+### PN532 Shield Configuration
 
-    IMPORTANT: The MFRC522 runs at 3.3V. Do NOT connect to 5V.
-    Note: The MFRC522 IRQ pin is not used.
+The Adafruit PN532 shield uses SPI mode. Check the silkscreen on your
+specific board revision for the correct jumper settings:
 
-### Buttons
+    SEL0: closed
+    SEL1: closed
 
-Wire each button between the GPIO pin and GND. The software enables
-internal pull-up resistors, so no external resistors are needed.
+Note: Jumper settings vary between board revisions — always check the
+silkscreen printed on YOUR board rather than relying on online docs.
 
-    Pi GPIO              Button
-    ---------            ------
-    Pin 11 (GPIO 17)  -> Scan Nanoparticle button -> GND
-    Pin 13 (GPIO 27)  -> Start Test button        -> GND
-    Pin 15 (GPIO 22)  -> Reset button             -> GND
+### PN532 Shield Solder Bridges
 
-To use different GPIO pins, update the values in config.py:
+Bridge these pads on the shield (solder a blob across each pair):
 
-    GPIO_BUTTON_SCAN = 17
-    GPIO_BUTTON_TEST = 27
-    GPIO_BUTTON_RESET = 22
+    Shield Pad    Arduino Pin
+    ----------    -----------
+    IRQ        -> D2
+    RST        -> D3
+    SCK        -> D4
+    MISO       -> D5
+    SS         -> D6
+    MOSI       -> D7
+
+### Start Button
+
+Wire a momentary push button between D8 and GND on the Arduino.
+The firmware enables the internal pull-up resistor, so no external
+resistor is needed.
+
+    Arduino Pin 8 -> Button -> GND
+
+### Upload Firmware
+
+1. Open arduino/tdd_rfid/tdd_rfid.ino in the Arduino IDE
+2. Install these libraries via Library Manager (Sketch -> Include Library):
+   - Adafruit PN532
+   - Adafruit BusIO (installed automatically as dependency)
+3. Select Board: Arduino Uno, and the correct serial port
+4. Upload
+
+Verify in Serial Monitor (115200 baud):
+
+    {"type":"ready","ic":"PN532","fw":"1.6"}
+
+Place an NFC tag on the reader to confirm:
+
+    {"type":"tag","uid":"AA:BB:CC:DD"}
+
+### Connect to Pi
+
+Connect the Arduino to the Pi via USB cable. It will appear as
+/dev/ttyACM0 (auto-detected by the master server).
 
 
-Step 3: Install Python Dependencies
+Step 4: Install Python Dependencies
 ------------------------------------
 
 First, install system-level dependencies that require C compilation:
@@ -138,7 +161,6 @@ hardware libraries (lgpio, RPi.GPIO) that have C dependencies:
     python -m venv --system-site-packages venv
     source venv/bin/activate
     pip install -r requirements.txt
-    pip install git+https://github.com/Dennis-89/MFRC522-python-SimpleMFRC522.git
 
 You must activate the venv before running any Pi scripts:
 
@@ -149,7 +171,7 @@ Tip: Add it to your .bashrc so it activates on login:
     echo 'source ~/TargetedDrugDelivery/pi/venv/bin/activate' >> ~/.bashrc
 
 
-Step 4: Verify Sensor Wiring
+Step 5: Verify Sensor Wiring
 -----------------------------
 
 Run the I2C detection tool to verify the multiplexer is visible:
@@ -171,7 +193,7 @@ Test a single channel:
     python test_sensors.py --single 0
 
 
-Step 5: Calibrate Color Sensors
+Step 6: Calibrate Color Sensors
 -------------------------------
 
 The sensors need to be calibrated for your specific ligand pieces and
@@ -180,30 +202,14 @@ lighting conditions. Run the calibration utility:
     python color_calibration.py
 
 The utility will prompt you to place each colored ligand (Red, Blue, Green,
-Purple, Orange, Yellow) under sensor 0, then take 10 readings and average
-them. It also calibrates the "empty slot" threshold.
+Purple, Orange, Yellow) under each sensor, then take 10 readings and average
+them. Calibration is per-sensor to account for LED brightness and mounting
+differences. It also calibrates the "empty slot" reading.
 
 Results are saved to color_map.json. Re-run calibration if you change:
 - The physical ligand pieces (different material or paint)
-- The sensor mounting distance
-- The ambient lighting conditions
-
-
-Step 6: Verify RFID Reader
----------------------------
-
-Run the RFID test script to confirm the reader is working:
-
-    python test_rfid.py --once
-
-This reads one tag and prints its UID. Other modes:
-
-    python test_rfid.py              # Continuous scan (blocking reads)
-    python test_rfid.py --poll       # Non-blocking polling
-    python test_rfid.py --lookup     # Also show puzzle mapping if registered
-
-If initialization fails, check that SPI is enabled (Step 1) and wiring
-matches the diagram in Step 2.
+- The sensor mounting distance or angle
+- The lighting conditions (LEDs, shrouds, ambient light)
 
 
 Step 7: Register RFID Tags
@@ -216,18 +222,15 @@ it to a puzzle file.
 1. Create puzzle JSON files in the puzzles/ directory. Use
    puzzles/puzzle-example-01.json as a template.
 
-2. Scan each tag to get its UID:
-
-    python test_rfid.py --once
+2. Scan each tag by placing it on the PN532 shield. The UID will appear in
+   the Arduino serial monitor, or in the master server logs.
 
 3. Add entries to puzzles/index.json mapping each UID to a puzzle file:
 
     {
-      "123456789": "puzzle-example-01.json",
-      "987654321": "puzzle-hard-02.json"
+      "AA:BB:CC:DD": "puzzle-example-01.json",
+      "11:22:33:44": "puzzle-hard-02.json"
     }
-
-   Replace the numbers with the actual UIDs printed in step 2.
 
 
 Step 8: Network Setup
@@ -285,14 +288,19 @@ Step 9: Start the Master Server
 
 The server starts on port 5000. You should see:
 
-    INFO: Sensor service ready
-    INFO: RFID service ready
-    INFO: GPIO input ready
+    INFO: Color sensor service ready
+    INFO: Arduino RFID/button ready
     INFO: Starting master server on 0.0.0.0:5000
 
 To skip hardware that isn't connected (for testing):
 
-    python master_server.py --no-gpio --no-sensors --no-rfid
+    python master_server.py --no-sensors      # Skip color sensors
+    python master_server.py --no-rfid         # Skip Arduino RFID
+    python master_server.py --no-hardware     # Skip all hardware
+
+To specify the Arduino serial port manually:
+
+    python master_server.py --serial /dev/ttyACM0
 
 
 Step 10: Connect Client Computers
@@ -344,9 +352,9 @@ Contents:
 
     [Service]
     Type=simple
-    User=pi
-    WorkingDirectory=/home/pi/Targeted-Drug-Delivery/pi
-    ExecStart=/home/pi/Targeted-Drug-Delivery/pi/venv/bin/python master_server.py
+    User=tdd
+    WorkingDirectory=/home/tdd/TargetedDrugDelivery/pi
+    ExecStart=/home/tdd/TargetedDrugDelivery/pi/venv/bin/python master_server.py
     Restart=always
     RestartSec=5
 
@@ -376,10 +384,16 @@ Troubleshooting
 - Check wiring: sudo i2cdetect -y 1 should show 0x70
 - Check power: TCA9548A and sensors need 3.3V
 
-"RFID read error"
-- Check SPI is enabled: ls /dev/spidev*
-- Check wiring: SDA goes to CE0 (pin 24), not a random GPIO
-- Make sure tag is close to the reader antenna (within 2-3 cm)
+"PN532 not found" (Arduino serial monitor)
+- Check shield SEL jumpers match the silkscreen for SPI mode
+- Verify solder bridges: IRQ->D2, RST->D3, SCK->D4, MISO->D5, SS->D6, MOSI->D7
+- Try power cycling the Arduino (unplug USB and replug)
+- Run the Adafruit readMifare example sketch to test independently
+
+"Arduino not connected" (Pi master server)
+- Check USB cable between Arduino and Pi
+- Verify the Arduino appears: ls /dev/ttyACM*
+- Try specifying the port: python master_server.py --serial /dev/ttyACM0
 
 "No simulation clients connected"
 - Check network: ping the Pi from the client computer
@@ -388,8 +402,10 @@ Troubleshooting
 
 Sensors read wrong colors
 - Re-run color_calibration.py
+- Calibration is per-sensor — make sure each sensor is calibrated individually
 - Check ambient lighting (consistent lighting is important)
 - Ensure sensors are at a consistent distance from the ligand pieces
+- Use test_sensors.py --raw to inspect RGBC values
 
 Display not updating
 - Check browser console for WebSocket errors
