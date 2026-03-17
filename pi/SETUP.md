@@ -216,21 +216,41 @@ Step 7: Register RFID Tags
 ---------------------------
 
 Each RFID tag is identified by its factory UID (no data needs to be written
-to the tag). You just need to scan each tag once to learn its UID, then map
-it to a puzzle file.
+to the tag). Use the admin dashboard to associate tags with puzzle files.
 
-1. Create puzzle JSON files in the puzzles/ directory. Use
-   puzzles/puzzle-example-01.json as a template.
+### Create Puzzle Files
 
-2. Scan each tag by placing it on the PN532 shield. The UID will appear in
-   the Arduino serial monitor, or in the master server logs.
+Add puzzle JSON files to the puzzles/ directory. Use
+puzzles/puzzle-example-01.json as a template.
 
-3. Add entries to puzzles/index.json mapping each UID to a puzzle file:
+### Associate Tags Using the Admin Dashboard
+
+1. Start the master server (see Step 9) and open the admin dashboard in a
+   browser:
+
+       http://<pi-ip>:5000/admin
+
+2. Place an RFID tag on the PN532 shield. The tag's UID will appear live in
+   the "Live Tag Scanner" panel.
+
+3. Click a puzzle file name in the "Puzzle Files" panel to select it.
+
+4. Click "Associate Tag → Puzzle". The mapping is saved immediately to
+   puzzles/index.json and takes effect without restarting the server.
+
+5. Repeat for each tag. All current mappings are shown in the table at the
+   bottom of the page. Use the "Remove" button to delete a mapping.
+
+### Manual Editing (Alternative)
+
+You can also edit puzzles/index.json directly:
 
     {
       "AA:BB:CC:DD": "puzzle-example-01.json",
       "11:22:33:44": "puzzle-hard-02.json"
     }
+
+Restart the master server after manual edits for changes to take effect.
 
 
 Step 8: Network Setup
