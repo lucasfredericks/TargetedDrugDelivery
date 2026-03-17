@@ -202,7 +202,7 @@ class SensorService:
             color_names.append(name)
             raw_data.append({"r": r, "g": g, "b": b, "c": c})
 
-        logger.info("Sensor read: %s", color_names)
+        logger.debug("Sensor read: %s", color_names)
 
         return {
             "ligandPositions": ligand_positions,

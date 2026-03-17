@@ -330,6 +330,25 @@ def _emit_to_display(event, data):
     socketio.emit(event, data, room="display")
 
 
+# --- Background Tasks ---
+
+def _sensor_poll_loop():
+    """Continuously read color sensors and push nanoparticle display updates."""
+    while True:
+        socketio.sleep(1)
+        svc = sensor_service
+        if svc is None:
+            break
+        try:
+            result = svc.read_all()
+            _emit_to_display("nanoparticle_scanned", {
+                "ligandPositions": result["ligandPositions"],
+                "colors": result["colors"],
+            })
+        except Exception as e:
+            logger.error("Sensor poll error: %s", e)
+
+
 # --- Main ---
 
 def main():
@@ -356,6 +375,7 @@ def main():
                 from sensor_service import SensorService
                 sensor_service = SensorService()
                 sensor_service.initialize()
+                socketio.start_background_task(_sensor_poll_loop)
                 logger.info("Color sensor service ready")
             except Exception as e:
                 logger.error("Sensor init failed: %s", e)
@@ -376,9 +396,10 @@ def main():
                 logger.error("Arduino not connected. Use --no-rfid to skip.")
                 arduino_rfid = None
             else:
-                # Tag detected → notify admin, then load puzzle
+                # Tag detected → notify admin, scan nanoparticle, then load puzzle
                 def _on_tag(uid):
                     socketio.emit("admin_tag", {"uid": uid}, room="admin")
+                    action_scan_nanoparticle()
                     action_scan_rfid()
                 arduino_rfid.on_tag(_on_tag)
                 # Tag removed → notify admin
