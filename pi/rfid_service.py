@@ -41,24 +41,60 @@ class RFIDService:
     def initialize(self):
         """Load puzzle index and prepare RFID reader.
 
-        Creates SimpleMFRC522, then replaces its internal MFRC522 instance
-        with one configured for our custom RST pin (SimpleMFRC522's
-        constructor doesn't expose pin_rst).
+        Tries hardware SPI first. If the MFRC522 doesn't respond (version
+        register reads 0x00 or 0xFF), falls back to software bit-bang SPI
+        using the same GPIO pins.
         """
         self._load_puzzle_index()
         try:
             from mfrc522 import MFRC522, SimpleMFRC522
             self.reader = SimpleMFRC522()
-            # Replace the default MFRC522 with one using our RST pin
             self.reader.reader = MFRC522(
                 bus=RFID_SPI_BUS,
                 device=RFID_SPI_DEVICE,
                 pin_rst=RFID_RST_PIN
             )
-            logger.info("RFID reader initialized (RST=GPIO%d, SPI%d.%d)",
-                        RFID_RST_PIN, RFID_SPI_BUS, RFID_SPI_DEVICE)
+
+            # Verify hardware SPI works by reading the version register
+            mfrc = self.reader.reader
+            read_reg = getattr(mfrc, 'read_mfrc522', None) or getattr(mfrc, 'Read_MFRC522', None)
+            version = read_reg(0x37) if read_reg else 0
+            if version not in (0x00, 0xFF):
+                logger.info("RFID reader initialized via hardware SPI (version=0x%02X)", version)
+                return
+
+            # Hardware SPI failed — try software SPI
+            logger.warning("Hardware SPI not working (version=0x%02X), trying software SPI", version)
+            self._init_soft_spi()
+
         except Exception as e:
             logger.error("Failed to initialize RFID reader: %s", e)
+            self.reader = None
+
+    def _init_soft_spi(self):
+        """Initialize MFRC522 using software bit-bang SPI."""
+        try:
+            from mfrc522 import MFRC522, SimpleMFRC522
+            from soft_spi import SoftSPI
+
+            soft = SoftSPI(cs=8, sck=11, mosi=10, miso=9, speed=50000)
+            self.reader = SimpleMFRC522()
+            self.reader.reader = MFRC522(pin_rst=RFID_RST_PIN)
+            # Replace the hardware spidev with our software SPI
+            self.reader.reader.spi = soft
+
+            # Re-initialize the MFRC522 with software SPI
+            init_fn = getattr(self.reader.reader, 'mfrc522_init', None) or \
+                      getattr(self.reader.reader, 'MFRC522_Init', None)
+            if init_fn:
+                init_fn()
+
+            read_reg = getattr(self.reader.reader, 'read_mfrc522', None) or \
+                       getattr(self.reader.reader, 'Read_MFRC522', None)
+            version = read_reg(0x37) if read_reg else 0
+            logger.info("RFID reader initialized via software SPI (version=0x%02X)", version)
+        except Exception as e:
+            logger.error("Software SPI fallback failed: %s", e)
             self.reader = None
 
     def _load_puzzle_index(self):
