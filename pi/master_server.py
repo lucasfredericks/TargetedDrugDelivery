@@ -1,14 +1,12 @@
 """Master server for the Targeted Drug Delivery exhibit.
 
 Coordinates hardware I/O, simulation clients, and the results display.
-Hardware can be accessed in two modes:
-  - Default: Pi I2C color sensors + Arduino RFID/button over USB serial
-  - Legacy Pi mode: All I/O via Raspberry Pi GPIO/I2C/SPI (no Arduino)
+  - Color sensors: Pi I2C via TCA9548A multiplexer + 6x APDS-9960
+  - RFID + button: Arduino Uno with Adafruit PN532 shield over USB serial
 
 Usage:
-    python master_server.py                        # Default (Pi sensors + Arduino RFID)
+    python master_server.py                        # Default
     python master_server.py --serial /dev/ttyACM0  # Arduino on specific port
-    python master_server.py --legacy               # Legacy Pi-only mode
     python master_server.py --no-hardware          # No hardware (display/network only)
 """
 
@@ -38,11 +36,9 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 state_machine = ExhibitStateMachine()
 client_manager = ClientManager()
 
-# Optional hardware services (initialized based on CLI flags / mode)
-sensor_service = None
-rfid_service = None
-gpio_input = None
-arduino_rfid = None  # Arduino RFID + button service
+# Hardware services (initialized in main)
+sensor_service = None     # Pi I2C color sensors
+arduino_rfid = None       # Arduino PN532 RFID + start button
 
 
 # --- HTTP Routes ---
@@ -152,7 +148,7 @@ def action_scan_nanoparticle():
 
 def action_scan_rfid():
     """Read RFID tag and load puzzle config."""
-    svc = arduino_rfid or rfid_service
+    svc = arduino_rfid
     if svc is None:
         logger.warning("RFID service not available")
         return
@@ -250,13 +246,11 @@ def _emit_to_display(event, data):
 # --- Main ---
 
 def main():
-    global sensor_service, rfid_service, gpio_input, arduino_rfid
+    global sensor_service, arduino_rfid
 
     parser = argparse.ArgumentParser(description="TDD Exhibit Master Server")
     parser.add_argument("--serial", nargs="?", const="auto",
                         help="Arduino serial port (default: auto-detect)")
-    parser.add_argument("--legacy", action="store_true",
-                        help="Use legacy Pi-only mode (no Arduino)")
     parser.add_argument("--no-hardware", action="store_true",
                         help="Skip all hardware initialization")
     parser.add_argument("--no-sensors", action="store_true",
@@ -268,43 +262,7 @@ def main():
     if args.no_hardware:
         logger.info("Running without hardware (display/network only)")
 
-    elif args.legacy:
-        # Legacy Pi-only mode: all hardware via Pi GPIO/I2C/SPI
-        logger.info("Using legacy Pi-only hardware mode")
-
-        if not args.no_sensors:
-            try:
-                from sensor_service import SensorService
-                sensor_service = SensorService()
-                sensor_service.initialize()
-                logger.info("Color sensor service ready")
-            except Exception as e:
-                logger.error("Sensor init failed: %s", e)
-
-        if not args.no_rfid:
-            try:
-                from rfid_service import RFIDService
-                rfid_service = RFIDService()
-                rfid_service.initialize()
-                logger.info("RFID service ready (Pi SPI)")
-            except Exception as e:
-                logger.error("RFID init failed: %s", e)
-
-            try:
-                from gpio_input import GPIOInput
-                gpio_input = GPIOInput()
-                gpio_input.initialize()
-                gpio_input.on_scan(action_scan_nanoparticle)
-                gpio_input.on_test(action_start_test)
-                gpio_input.on_reset(action_reset)
-                logger.info("GPIO input ready")
-            except Exception as e:
-                logger.error("GPIO init failed: %s", e)
-
     else:
-        # Default hybrid mode: Pi color sensors + Arduino RFID/button
-        logger.info("Using hybrid mode (Pi sensors + Arduino RFID/button)")
-
         # Color sensors via Pi I2C
         if not args.no_sensors:
             try:
@@ -328,7 +286,7 @@ def main():
             arduino_rfid.initialize()
 
             if arduino_rfid.ser is None:
-                logger.error("Arduino not connected. Use --no-rfid or --legacy.")
+                logger.error("Arduino not connected. Use --no-rfid to skip.")
                 arduino_rfid = None
             else:
                 # Tag detected → load puzzle

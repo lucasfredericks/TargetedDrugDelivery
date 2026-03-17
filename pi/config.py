@@ -43,18 +43,7 @@ DEFAULT_TOXICITY = 2
 # Stats update interval from clients (ms)
 STATS_INTERVAL_MS = 800
 
-# Arduino serial connection (replaces direct GPIO/I2C/SPI hardware access)
-SERIAL_PORT = "/dev/ttyUSB0"   # Arduino USB serial (ttyACM0 for Mega/Uno native USB)
+# Arduino serial connection (PN532 RFID + start button)
+SERIAL_PORT = "/dev/ttyACM0"   # Arduino Uno native USB
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 2             # seconds
-
-# Legacy: RFID (MFRC522 via SPI — only used when running without Arduino)
-RFID_RST_PIN = 6
-RFID_SPI_BUS = 0
-RFID_SPI_DEVICE = 0
-
-# Legacy: GPIO buttons (only used when running without Arduino)
-GPIO_BUTTON_SCAN = 17
-GPIO_BUTTON_TEST = 27
-GPIO_BUTTON_RESET = 22
-GPIO_DEBOUNCE_MS = 300

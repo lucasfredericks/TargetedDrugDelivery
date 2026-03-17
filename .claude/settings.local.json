@@ -8,7 +8,20 @@
       "Bash(git push:*)",
       "WebFetch(domain:github.com)",
       "Bash(node -c:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(cd /c/Users/lfredericks/Documents/Exhibits/BME/\"Targeted Drug Delivery\")",
+      "WebFetch(domain:www.sunfounder.com)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:cdn.sparkfun.com)",
+      "WebFetch(domain:components101.com)",
+      "WebFetch(domain:docs.circuitpython.org)",
+      "WebFetch(domain:forums.adafruit.com)",
+      "WebSearch",
+      "Bash(cd /c/Users/lfredericks/Documents/Exhibits/BME/'Targeted Drug Delivery')",
+      "Bash(grep -l \"serial_service\\\\|color_calibration_serial\\\\|test_arduino\\\\|soft_spi\\\\|tdd_io\" pi/*.py)"
     ]
   }
 }
