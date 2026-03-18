@@ -353,11 +353,21 @@ def _sensor_poll_loop():
     in the greenlet context where it works reliably.
     """
     from eventlet import tpool
+    from config import NUM_SENSORS, COLOR_NONE
+    empty_positions = [COLOR_NONE] * NUM_SENSORS
+    empty_colors = ["None"] * NUM_SENSORS
     while True:
         socketio.sleep(1)
         svc = sensor_service
         if svc is None:
             break
+        # No tag present → all slots empty, skip I2C reads
+        if arduino_rfid is None or arduino_rfid.current_tag_uid is None:
+            _emit_to_display("nanoparticle_scanned", {
+                "ligandPositions": empty_positions,
+                "colors": empty_colors,
+            })
+            continue
         try:
             result = tpool.execute(_do_sensor_read, svc)
             _emit_to_display("nanoparticle_scanned", {

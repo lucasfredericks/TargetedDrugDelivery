@@ -134,7 +134,9 @@ function renderNanoparticle(positions, colorNames) {
         ctx.stroke();
     }
 
-    // Draw central hexagon on top — always yellow, covers triangle tips
+    // Draw central hexagon on top — covers triangle tips
+    // Use empty color when all ligand slots are empty, yellow otherwise
+    const allEmpty = !colorNames || colorNames.every(c => !c || c === "None");
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
         const angle = -Math.PI / 2 + i * 2 * Math.PI / 6;
@@ -144,7 +146,7 @@ function renderNanoparticle(positions, colorNames) {
         else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.fillStyle = "#f1c40f";
+    ctx.fillStyle = allEmpty ? LIGAND_COLORS_HEX["None"] : "#f1c40f";
     ctx.fill();
     ctx.strokeStyle = "#888";
     ctx.lineWidth = 1.5;
