@@ -21,7 +21,8 @@
       "WebFetch(domain:forums.adafruit.com)",
       "WebSearch",
       "Bash(cd /c/Users/lfredericks/Documents/Exhibits/BME/'Targeted Drug Delivery')",
-      "Bash(grep -l \"serial_service\\\\|color_calibration_serial\\\\|test_arduino\\\\|soft_spi\\\\|tdd_io\" pi/*.py)"
+      "Bash(grep -l \"serial_service\\\\|color_calibration_serial\\\\|test_arduino\\\\|soft_spi\\\\|tdd_io\" pi/*.py)",
+      "Bash(grep -E '\\\\.\\(css|py\\)$')"
     ]
   }
 }

@@ -16,7 +16,7 @@ NUM_SENSORS = 6
 # color_gain: 0=1x, 1=4x, 2=16x, 3=64x
 COLOR_GAIN = 1  # 4x
 # color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
-COLOR_INTEGRATION_TIME = 256
+COLOR_INTEGRATION_TIME = 64
 
 # Ligand color names matching the simulation's color indices (0-5)
 LIGAND_COLORS = ["Red", "Blue", "Green", "Purple", "Orange", "Yellow"]

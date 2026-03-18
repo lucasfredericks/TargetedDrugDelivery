@@ -2,7 +2,8 @@
 
 Each sensor reads the color of one ligand slot on the physical nanoparticle model.
 Color matching uses 4D Euclidean distance: clear-normalized RGB for hue plus
-scaled raw clear for brightness. Proximity is used as a hint for empty detection.
+scaled raw clear for brightness. Empty slots are matched as a calibrated color ("None"),
+not via proximity, since some ligand materials are IR-absorptive.
 """
 
 import json
@@ -139,17 +140,9 @@ class SensorService:
         """Map reading to the nearest calibrated color using 4D distance.
 
         Uses clear-normalized RGB (hue) + scaled raw clear (brightness).
-        Hue separates Blue/Green; brightness separates Red/Orange.
-        Proximity provides a confident "empty" shortcut when available.
+        Empty slots are matched as the calibrated "None" color, not via proximity.
         Returns (color_name, color_index).
         """
-        # Use proximity only when confidently empty (well below threshold)
-        threshold = self.proximity_thresholds.get(channel)
-        if threshold is not None:
-            prox = self.read_proximity(channel)
-            if prox is not None and prox < threshold * 0.5:
-                return ("None", COLOR_NONE)
-
         color_map = self.sensor_color_maps.get(channel, {})
         if not color_map:
             return ("None", COLOR_NONE)
