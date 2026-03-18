@@ -120,8 +120,7 @@ function renderNanoparticle(positions, colorNames) {
         const px = Math.cos(mid + Math.PI / 2);
         const py = Math.sin(mid + Math.PI / 2);
 
-        const colorIdx = positions[i];
-        const colorName = colorIdx >= 0 ? LIGAND_NAMES[colorIdx] : "None";
+        const colorName = (colorNames && colorNames[i]) ? colorNames[i] : "None";
 
         ctx.beginPath();
         ctx.moveTo(tipX, tipY);

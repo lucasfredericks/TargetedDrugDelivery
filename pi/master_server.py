@@ -43,6 +43,7 @@ client_manager = ClientManager()
 # Hardware services (initialized in main)
 sensor_service = None     # Pi I2C color sensors
 arduino_rfid = None       # Arduino PN532 RFID + start button
+_sensor_lock = threading.Lock()  # Prevents concurrent I2C reads from multiple threads
 
 
 # --- HTTP Routes ---
@@ -222,7 +223,8 @@ def action_scan_nanoparticle():
         logger.warning("Sensor service not available")
         return
 
-    result = svc.read_all()
+    with _sensor_lock:
+        result = svc.read_all()
     positions = result["ligandPositions"]
     colors = result["colors"]
 
@@ -346,7 +348,8 @@ def _sensor_poll_loop():
         if svc is None:
             break
         try:
-            result = svc.read_all()
+            with _sensor_lock:
+                result = svc.read_all()
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": result["ligandPositions"],
                 "colors": result["colors"],
