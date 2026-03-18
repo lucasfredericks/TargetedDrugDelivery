@@ -15,6 +15,8 @@ import json as _json
 import logging
 import os
 import sys
+import threading
+import time
 
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
@@ -333,9 +335,13 @@ def _emit_to_display(event, data):
 # --- Background Tasks ---
 
 def _sensor_poll_loop():
-    """Continuously read color sensors and push nanoparticle display updates."""
+    """Continuously read color sensors and push nanoparticle display updates.
+
+    Runs in a real OS thread (not an eventlet greenlet) so that blocking
+    I2C hardware calls work correctly.
+    """
     while True:
-        socketio.sleep(1)
+        time.sleep(1)
         svc = sensor_service
         if svc is None:
             break
@@ -375,7 +381,7 @@ def main():
                 from sensor_service import SensorService
                 sensor_service = SensorService()
                 sensor_service.initialize()
-                socketio.start_background_task(_sensor_poll_loop)
+                threading.Thread(target=_sensor_poll_loop, daemon=True).start()
                 logger.info("Color sensor service ready")
             except Exception as e:
                 logger.error("Sensor init failed: %s", e)
