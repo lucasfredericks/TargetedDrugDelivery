@@ -16,7 +16,6 @@ import logging
 import os
 import sys
 import threading
-import time
 
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
@@ -336,20 +335,27 @@ def _emit_to_display(event, data):
 
 # --- Background Tasks ---
 
-def _sensor_poll_loop():
-    """Continuously read color sensors and push nanoparticle display updates.
+def _do_sensor_read(svc):
+    """Read all sensors under the lock. Runs in a real OS thread via tpool."""
+    with _sensor_lock:
+        return svc.read_all()
 
-    Runs in a real OS thread (not an eventlet greenlet) so that blocking
-    I2C hardware calls work correctly.
+
+def _sensor_poll_loop():
+    """Eventlet greenlet: schedule sensor reads every second and push to display.
+
+    Uses eventlet.tpool.execute so the blocking I2C reads happen in a real OS
+    thread while this greenlet yields cooperatively — keeping socketio.emit
+    in the greenlet context where it works reliably.
     """
+    import eventlet
     while True:
-        time.sleep(1)
+        socketio.sleep(1)
         svc = sensor_service
         if svc is None:
             break
         try:
-            with _sensor_lock:
-                result = svc.read_all()
+            result = eventlet.tpool.execute(_do_sensor_read, svc)
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": result["ligandPositions"],
                 "colors": result["colors"],
@@ -384,7 +390,7 @@ def main():
                 from sensor_service import SensorService
                 sensor_service = SensorService()
                 sensor_service.initialize()
-                threading.Thread(target=_sensor_poll_loop, daemon=True).start()
+                socketio.start_background_task(_sensor_poll_loop)
                 logger.info("Color sensor service ready")
             except Exception as e:
                 logger.error("Sensor init failed: %s", e)
