@@ -362,10 +362,13 @@ def _sensor_poll_loop():
         if svc is None:
             break
         # No tag present → all slots empty, skip I2C reads
-        if arduino_rfid is None or arduino_rfid.current_tag_uid is None:
+        tag_present = (arduino_rfid is not None
+                       and arduino_rfid.current_tag_uid is not None)
+        if not tag_present:
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": empty_positions,
                 "colors": empty_colors,
+                "tagPresent": False,
             })
             continue
         try:
@@ -373,6 +376,7 @@ def _sensor_poll_loop():
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": result["ligandPositions"],
                 "colors": result["colors"],
+                "tagPresent": True,
             })
         except Exception as e:
             logger.error("Sensor poll error: %s", e)

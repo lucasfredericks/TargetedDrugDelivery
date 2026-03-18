@@ -51,7 +51,7 @@ socket.on("state_sync", (data) => {
 
 socket.on("nanoparticle_scanned", (data) => {
     currentLigands = data.ligandPositions;
-    renderNanoparticle(data.ligandPositions, data.colors);
+    renderNanoparticle(data.ligandPositions, data.colors, data.tagPresent);
     updateStatus("NANOPARTICLE_SCANNED");
 });
 
@@ -98,7 +98,7 @@ function updateStatus(state) {
     badge.className = "status-badge status-" + state.toLowerCase();
 }
 
-function renderNanoparticle(positions, colorNames) {
+function renderNanoparticle(positions, colorNames, tagPresent) {
     const canvas = document.getElementById("nanoparticle-canvas");
     const ctx = canvas.getContext("2d");
     const cx = canvas.width / 2;
@@ -135,8 +135,7 @@ function renderNanoparticle(positions, colorNames) {
     }
 
     // Draw central hexagon on top — covers triangle tips
-    // Use empty color when all ligand slots are empty, yellow otherwise
-    const allEmpty = !colorNames || colorNames.every(c => !c || c === "None");
+    // Yellow when RFID tag is present, empty color otherwise
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
         const angle = -Math.PI / 2 + i * 2 * Math.PI / 6;
@@ -146,7 +145,7 @@ function renderNanoparticle(positions, colorNames) {
         else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.fillStyle = allEmpty ? LIGAND_COLORS_HEX["None"] : "#f1c40f";
+    ctx.fillStyle = tagPresent ? "#f1c40f" : LIGAND_COLORS_HEX["None"];
     ctx.fill();
     ctx.strokeStyle = "#888";
     ctx.lineWidth = 1.5;
