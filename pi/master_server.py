@@ -348,14 +348,14 @@ def _sensor_poll_loop():
     thread while this greenlet yields cooperatively — keeping socketio.emit
     in the greenlet context where it works reliably.
     """
-    import eventlet
+    from eventlet import tpool
     while True:
         socketio.sleep(1)
         svc = sensor_service
         if svc is None:
             break
         try:
-            result = eventlet.tpool.execute(_do_sensor_read, svc)
+            result = tpool.execute(_do_sensor_read, svc)
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": result["ligandPositions"],
                 "colors": result["colors"],
