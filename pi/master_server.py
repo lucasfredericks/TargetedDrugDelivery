@@ -216,14 +216,18 @@ def handle_join_admin():
 # --- Button Actions (called from GPIO or Socket.IO) ---
 
 def action_scan_nanoparticle():
-    """Read color sensors and update nanoparticle state."""
+    """Read color sensors and update nanoparticle state.
+
+    Uses tpool.execute so the blocking I2C read + lock acquisition happens
+    in a real OS thread, keeping the eventlet event loop responsive.
+    """
     svc = sensor_service
     if svc is None:
         logger.warning("Sensor service not available")
         return
 
-    with _sensor_lock:
-        result = svc.read_all()
+    from eventlet import tpool
+    result = tpool.execute(_do_sensor_read, svc)
     positions = result["ligandPositions"]
     colors = result["colors"]
 
@@ -412,17 +416,29 @@ def main():
                 arduino_rfid = None
             else:
                 # Tag detected → notify admin, scan nanoparticle, then load puzzle
+                # Callbacks fire in the Arduino reader thread (a non-eventlet
+                # OS thread).  We must bounce into the eventlet context via
+                # start_background_task so that socketio.emit and tpool work
+                # correctly — calling them directly from the reader thread can
+                # corrupt the eventlet event-loop / websocket state and freeze
+                # the sensor poll greenlet.
                 def _on_tag(uid):
-                    socketio.emit("admin_tag", {"uid": uid}, room="admin")
-                    action_scan_nanoparticle()
-                    action_scan_rfid()
+                    def _handle():
+                        socketio.emit("admin_tag", {"uid": uid}, room="admin")
+                        action_scan_nanoparticle()
+                        action_scan_rfid()
+                    socketio.start_background_task(_handle)
                 arduino_rfid.on_tag(_on_tag)
                 # Tag removed → notify admin
                 arduino_rfid.on_tag_removed(
-                    lambda: socketio.emit("admin_tag_removed", {}, room="admin")
+                    lambda: socketio.start_background_task(
+                        lambda: socketio.emit("admin_tag_removed", {}, room="admin")
+                    )
                 )
                 # Start button → start test
-                arduino_rfid.on_start(action_start_test)
+                arduino_rfid.on_start(
+                    lambda: socketio.start_background_task(action_start_test)
+                )
                 logger.info("Arduino RFID/button ready")
 
     logger.info("Starting master server on %s:%d", SERVER_HOST, SERVER_PORT)
