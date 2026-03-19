@@ -81,6 +81,10 @@ class NetworkClient {
       console.log("Network: reset received");
       if (this._onReset) this._onReset();
     });
+
+    this.socket.on("ligand_update", (data) => {
+      if (this._onLigandUpdate) this._onLigandUpdate(data);
+    });
   }
 
   // --- BroadcastChannel mode (local development fallback) ---
@@ -128,6 +132,11 @@ class NetworkClient {
   /** Called when master assigns tissues to this client. */
   onAssignment(callback) {
     this._onAssignment = callback;
+  }
+
+  /** Called when master sends ligand/puzzle preview update (outside of test). */
+  onLigandUpdate(callback) {
+    this._onLigandUpdate = callback;
   }
 
   // --- Outbound messages ---

@@ -260,6 +260,12 @@ def action_scan_nanoparticle():
         "colors": colors,
         "raw": result["raw"]
     })
+    # Push ligand positions to sim clients so they can update affinity preview
+    if state_machine.state != State.TESTING:
+        socketio.emit("ligand_update", {
+            "ligandPositions": positions,
+            "puzzle": state_machine.current_puzzle,
+        }, room="sim_clients")
     logger.info("Nanoparticle scanned: %s", colors)
 
 
@@ -296,6 +302,12 @@ def action_scan_rfid(uid=None):
 
     state_machine.load_puzzle(puzzle)
     _emit_to_display("puzzle_loaded", {"puzzleId": puzzle_id, "puzzle": puzzle})
+    # Push puzzle tissue config to sim clients so affinity preview updates immediately
+    if state_machine.state != State.TESTING:
+        socketio.emit("ligand_update", {
+            "ligandPositions": state_machine.ligand_positions,
+            "puzzle": puzzle,
+        }, room="sim_clients")
     logger.info("Puzzle loaded: %s", puzzle_id)
 
 
@@ -442,6 +454,11 @@ def _sensor_poll_loop():
                 "colors": colors,
                 "tagPresent": True,
             })
+            if state_machine.state != State.TESTING:
+                socketio.emit("ligand_update", {
+                    "ligandPositions": positions,
+                    "puzzle": state_machine.current_puzzle,
+                }, room="sim_clients")
         except Exception as e:
             logger.error("Sensor poll error: %s", e)
 

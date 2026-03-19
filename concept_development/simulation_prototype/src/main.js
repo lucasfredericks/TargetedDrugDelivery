@@ -346,6 +346,22 @@ function setupNetwork() {
     }
     updateScoreboard();
   });
+
+  // Handle ligand/puzzle preview update from Pi master (outside of test)
+  network.onLigandUpdate((data) => {
+    // Don't change sim state mid-test; just update affinity preview
+    if (simulations.some(sim => sim.getTestStatus().testMode)) return;
+    if (data.ligandPositions) {
+      globalParams.ligandPositions = data.ligandPositions;
+      for (let sim of simulations) {
+        sim.setLigandPositions(data.ligandPositions);
+      }
+    }
+    if (data.puzzle) {
+      applyPuzzleWithoutLigands(data.puzzle);
+    }
+    sendStats();
+  });
 }
 
 // Send stats to Pi master or dashboard
