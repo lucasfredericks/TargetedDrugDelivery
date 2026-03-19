@@ -17,7 +17,7 @@ import os
 import sys
 import threading
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from config import SERVER_HOST, SERVER_PORT, DEFAULT_PARTICLE_COUNT, DEFAULT_TOXICITY
@@ -51,6 +51,20 @@ _sensor_lock = threading.Lock()  # Prevents concurrent I2C reads from multiple t
 def index():
     """Redirect to display page."""
     return render_template("display.html")
+
+
+_SIM_DIR = os.path.join(os.path.dirname(__file__), "..", "concept_development", "simulation_prototype")
+
+@app.route("/sim")
+@app.route("/sim/")
+def sim_index():
+    """Serve the simulation prototype index page."""
+    return send_from_directory(_SIM_DIR, "index.html")
+
+@app.route("/sim/<path:filename>")
+def sim_files(filename):
+    """Serve simulation prototype static files."""
+    return send_from_directory(_SIM_DIR, filename)
 
 
 @app.route("/status")

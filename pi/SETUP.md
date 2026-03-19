@@ -337,12 +337,7 @@ Step 10: Connect Client Computers
 
 On each client computer, open the simulation in a web browser:
 
-    http://192.168.1.1:5000/../concept_development/simulation_prototype/index.html?server=192.168.1.1:5000
-
-Or serve the simulation files from the Pi by copying them to the static
-directory, then load:
-
-    http://192.168.1.1:5000/static/index.html?server=192.168.1.1:5000
+    http://192.168.1.1:5000/sim?server=192.168.1.1:5000
 
 The client will connect via Socket.IO and register with the master.
 Tissues are assigned automatically based on the number of clients:
