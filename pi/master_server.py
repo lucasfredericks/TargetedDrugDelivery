@@ -56,6 +56,11 @@ def index():
 _SIM_DIR = os.path.join(os.path.dirname(__file__), "..", "concept_development", "simulation_prototype")
 
 @app.route("/sim")
+def sim_redirect():
+    """Redirect /sim to /sim/ so relative paths in index.html resolve correctly."""
+    from flask import redirect, request as req
+    return redirect(req.url.replace("/sim", "/sim/", 1), code=301)
+
 @app.route("/sim/")
 def sim_index():
     """Serve the simulation prototype index page."""
