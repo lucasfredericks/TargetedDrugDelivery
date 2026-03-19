@@ -228,7 +228,7 @@ function renderResults(stats) {
         const affinity = stat.theoreticalScore || 0;
         const killRate = stat.absorptionEfficiency || 0;
         const progress = stat.progress || 0;
-        const bindingEvents = stat.attempts || 0;
+        const bindingEvents = stat.bindingEvents || 0;
 
         const card = document.createElement("div");
         card.className = "result-card";

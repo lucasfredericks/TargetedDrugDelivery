@@ -61,7 +61,7 @@
           if (existingIdx >= 0) {
             latestStats[existingIdx].absorptionEfficiency = incoming.absorptionEfficiency;
             latestStats[existingIdx].totalAbsorbedDrugs = incoming.totalAbsorbedDrugs;
-            latestStats[existingIdx].attempts = incoming.attempts;
+            latestStats[existingIdx].bindingEvents = incoming.bindingEvents;
             latestStats[existingIdx].theoreticalScore = incoming.theoreticalScore;
           }
         }
@@ -131,7 +131,7 @@
         theoreticalScore: theoryScore,
         absorptionEfficiency: existing.absorptionEfficiency || 0,
         totalAbsorbedDrugs: existing.totalAbsorbedDrugs || 0,
-        attempts: existing.attempts || 0
+        bindingEvents: existing.bindingEvents || 0
       };
     });
 
@@ -176,8 +176,8 @@
     let killHtml = '';
     for (let stat of latestStats) {
       const pct = Math.min(100, Math.max(0, stat.absorptionEfficiency || 0));
-      const absorbed = stat.totalAbsorbedDrugs || 0;
-      const subtitle = absorbed > 0 ? `${absorbed} absorbed` : '';
+      const bindingEvents = stat.bindingEvents || 0;
+      const subtitle = bindingEvents > 0 ? `${bindingEvents} binding events` : '';
       killHtml += `
         <div class="tissue-bar-row">
           <div class="tissue-bar-label">${stat.name}</div>
@@ -385,7 +385,7 @@
     }
     drawPreview();
     // Reset actual scores in bar graph
-    latestStats = latestStats.map(s => ({...s, absorptionEfficiency: 0, totalAbsorbedDrugs: 0, attempts: 0}));
+    latestStats = latestStats.map(s => ({...s, absorptionEfficiency: 0, totalAbsorbedDrugs: 0, bindingEvents: 0}));
     updateBarGraph();
     sendParams('reset');
   };
