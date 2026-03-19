@@ -240,14 +240,24 @@ def action_scan_nanoparticle():
     logger.info("Nanoparticle scanned: %s", colors)
 
 
-def action_scan_rfid():
-    """Read RFID tag and load puzzle config."""
+def action_scan_rfid(uid=None):
+    """Read RFID tag and load puzzle config.
+
+    If *uid* is provided it is used directly for the puzzle lookup,
+    avoiding a race where current_tag_uid may have been cleared by
+    a tag_removed event processed while a background task was pending.
+    """
     svc = arduino_rfid
     if svc is None:
         logger.warning("RFID service not available")
         return
 
-    puzzle_id, puzzle = svc.scan_and_load()
+    if uid:
+        puzzle = svc.lookup_puzzle(uid)
+        puzzle_id = uid
+    else:
+        puzzle_id, puzzle = svc.scan_and_load()
+
     if puzzle is None:
         _emit_to_display("error", {"message": f"Unknown puzzle tag: {puzzle_id}"})
         return
@@ -439,8 +449,11 @@ def main():
                 def _on_tag(uid):
                     def _handle():
                         socketio.emit("admin_tag", {"uid": uid}, room="admin")
-                        action_scan_nanoparticle()
-                        action_scan_rfid()
+                        try:
+                            action_scan_nanoparticle()
+                        except Exception as e:
+                            logger.error("Scan nanoparticle error: %s", e)
+                        action_scan_rfid(uid)
                     socketio.start_background_task(_handle)
                 arduino_rfid.on_tag(_on_tag)
                 # Tag removed → notify admin
