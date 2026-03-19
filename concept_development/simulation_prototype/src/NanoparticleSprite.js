@@ -1,5 +1,15 @@
 // NanoparticleSprite.js - Nanoparticle sprite generation
 
+// Compute the hex vertex radius for a given sprite size.
+// Used by both the sprite generator and the in-cell hex renderer to stay in sync.
+function computeParticleHexR(size) {
+  const pad = 2;
+  const maxR = size / 2 - pad;
+  const cos30 = Math.cos(Math.PI / 6);
+  const denom = cos30 + 0.95;
+  return Math.min(size * 0.35, Math.max(4, (maxR + 1) / denom));
+}
+
 // Generate a nanoparticle sprite based on ligand positions and toxicity
 function generateParticleSprite(size, ligandPositions, toxicity) {
   if (typeof createGraphics !== 'function') return null;
@@ -11,12 +21,8 @@ function generateParticleSprite(size, ligandPositions, toxicity) {
   g.translate(size / 2, size / 2);
 
   // Compute a safe hex radius so triangles fit inside the sprite bounds
-  const pad = 2;
-  const maxR = size / 2 - pad;
-  const cos30 = Math.cos(Math.PI / 6);
-  const denom = cos30 + 0.95;
-  let hexR = Math.min(size * 0.35, Math.max(4, (maxR + 1) / denom));
-  const apothem = hexR * cos30;
+  const hexR = computeParticleHexR(size);
+  const apothem = hexR * Math.cos(Math.PI / 6);
 
   const arrangement = ligandPositions.slice(0, 6);
 
@@ -129,5 +135,6 @@ function drawNanoparticlePreviewToContext(ctx, w, h, ligandPositions, toxicity) 
 }
 
 // Export for browser global
+window.computeParticleHexR = computeParticleHexR;
 window.generateParticleSprite = generateParticleSprite;
 window.drawNanoparticlePreviewToContext = drawNanoparticlePreviewToContext;

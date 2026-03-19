@@ -166,7 +166,7 @@
     }
     affinityContent.innerHTML = affinityHtml;
 
-    // Cell Kill Rate — only shown after a test has produced actual data
+    // Cell Death Rate — only shown after a test has produced actual data
     const hasActualData = latestStats.some(s => (s.absorptionEfficiency || 0) > 0 || (s.totalAbsorbedDrugs || 0) > 0);
     if (!hasActualData) {
       killRateContent.innerHTML = '<div style="color:#888;font-size:12px">Run a test to see results</div>';

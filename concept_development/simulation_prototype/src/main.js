@@ -362,7 +362,9 @@ function sendStats() {
       absorptionEfficiency: s.absorptionEfficiency,
       totalAbsorbedDrugs: s.totalAbsorbedDrugs,
       attempts: s.attempts,
-      progress: testStatus.testMode ? (testStatus.released / Math.max(1, testStatus.total)) : 0
+      progress: testStatus.testMode
+        ? Math.min(1, (testStatus.released - testStatus.freeFlowing) / Math.max(1, testStatus.total))
+        : 0
     };
   });
 

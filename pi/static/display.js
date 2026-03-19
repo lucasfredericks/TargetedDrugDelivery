@@ -228,6 +228,7 @@ function renderResults(stats) {
         const affinity = stat.theoreticalScore || 0;
         const killRate = stat.absorptionEfficiency || 0;
         const progress = stat.progress || 0;
+        const bindingEvents = stat.attempts || 0;
 
         const card = document.createElement("div");
         card.className = "result-card";
@@ -246,7 +247,7 @@ function renderResults(stats) {
                 </div>
                 <div class="bar-group">
                     <div class="bar-label">
-                        <span>Cell Kill Rate</span>
+                        <span>Cell Death Rate</span>
                         <span>${killRate.toFixed(1)}%</span>
                     </div>
                     <div class="bar-track">
@@ -254,7 +255,8 @@ function renderResults(stats) {
                     </div>
                 </div>
             </div>
-            ${progress < 1 ? `<div style="color:#666;font-size:0.8em;margin-top:8px;">Progress: ${(progress * 100).toFixed(0)}%</div>` : ""}
+            <div style="color:#aaa;font-size:0.85em;margin-top:10px;">Binding Events: ${bindingEvents}</div>
+            ${progress < 1 ? `<div style="color:#666;font-size:0.8em;margin-top:4px;">Progress: ${(progress * 100).toFixed(0)}%</div>` : ""}
         `;
         area.appendChild(card);
     }

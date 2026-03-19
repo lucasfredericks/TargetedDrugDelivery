@@ -478,7 +478,7 @@ class Particle {
 
   // Render just the drug hexagon (during/after absorption, or while fading)
   renderDrugHexagon(g, spriteSize, toxicity, alphaOverride) {
-    const hexR = spriteSize * 0.35;
+    const hexR = computeParticleHexR(spriteSize);
     const alpha = alphaOverride !== undefined ? alphaOverride : (this.absorbed ? 200 : 255);
 
     g.push();

@@ -666,10 +666,10 @@ class Simulation {
   getStats() {
     const totalAbsorbedDrugs = this.totalAbsorbed;
 
-    // Score = drugs absorbed / total cell capacity (deathThreshold × initial cell count)
-    const totalCapacity = this.deathThreshold * this.initialCellCount;
-    const absorptionEfficiency = totalCapacity > 0
-      ? (totalAbsorbedDrugs / totalCapacity) * 100
+    // Score = dead cells / initial cell count, capped at 100%
+    const deadCells = this.cells.filter(c => c.dead || c.dying).length;
+    const absorptionEfficiency = this.initialCellCount > 0
+      ? Math.min(100, (deadCells / this.initialCellCount) * 100)
       : 0;
 
     // Theoretical score is snapshotted at test start (or when ligands change outside a test)
@@ -693,10 +693,14 @@ class Simulation {
    * Get test mode status
    */
   getTestStatus() {
+    const freeFlowing = this.particles.filter(
+      p => !p.bound && !p.absorbing && !p.absorbed && !p.fading
+    ).length;
     return {
       testMode: this.testMode,
       released: this.testParticlesReleased,
-      total: this.testParticlesTotal
+      total: this.testParticlesTotal,
+      freeFlowing
     };
   }
 }
