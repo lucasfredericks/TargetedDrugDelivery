@@ -433,9 +433,13 @@ def _sensor_poll_loop():
             continue
         try:
             result = tpool.execute(_do_sensor_read, svc)
+            positions = result["ligandPositions"]
+            colors = result["colors"]
+            # Keep state machine in sync so start_test sends current colors
+            state_machine.scan_nanoparticle(positions, colors)
             _emit_to_display("nanoparticle_scanned", {
-                "ligandPositions": result["ligandPositions"],
-                "colors": result["colors"],
+                "ligandPositions": positions,
+                "colors": colors,
                 "tagPresent": True,
             })
         except Exception as e:
