@@ -171,19 +171,24 @@ function renderPuzzleInfo(puzzle) {
         return;
     }
 
+    const MAX_R = 14; // max circle radius (px)
+
     let html = '<div class="tissue-list">';
     for (const tissue of puzzle.tissues) {
-        const topReceptors = tissue.receptors
-            .map((v, i) => ({ name: LIGAND_NAMES[i], val: v }))
-            .filter(r => r.val > 0.1)
-            .sort((a, b) => b.val - a.val)
-            .slice(0, 3)
-            .map(r => `${r.name} ${(r.val * 100).toFixed(0)}%`)
-            .join(", ");
-
+        let circles = '';
+        for (let i = 0; i < tissue.receptors.length; i++) {
+            const v = tissue.receptors[i];
+            if (v <= 0) continue;
+            const r = Math.max(2, Math.round(MAX_R * v));
+            const d = r * 2;
+            const color = LIGAND_COLORS_HEX[LIGAND_NAMES[i]] || "#444";
+            circles += `<svg width="${d}" height="${d}" style="flex-shrink:0;">` +
+                `<circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/>` +
+                `</svg>`;
+        }
         html += `<div class="tissue-item">
             <span class="tissue-name">${tissue.name}</span>
-            <span>${topReceptors}</span>
+            <span class="receptor-circles">${circles}</span>
         </div>`;
     }
     html += "</div>";

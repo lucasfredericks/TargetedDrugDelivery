@@ -117,6 +117,12 @@ main {
 
 .tissue-name { font-weight: bold; }
 
+.receptor-circles {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
 /* Right panel: results */
 .panel-right {
     display: flex;
