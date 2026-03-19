@@ -63,16 +63,13 @@ class ExhibitStateMachine:
         return True
 
     def scan_nanoparticle(self, ligand_positions, ligand_colors):
-        """Record a nanoparticle scan. Valid from IDLE or re-scan states."""
-        if self.state in (State.IDLE, State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED):
-            self.ligand_positions = ligand_positions
-            self.ligand_colors = ligand_colors
+        """Record a nanoparticle scan. Updates data in any state."""
+        self.ligand_positions = ligand_positions
+        self.ligand_colors = ligand_colors
 
-            if self.state == State.IDLE:
-                self.transition(State.NANOPARTICLE_SCANNED)
-            # Re-scan in other states keeps current state but updates data
-            return True
-        return False
+        if self.state == State.IDLE:
+            self.transition(State.NANOPARTICLE_SCANNED)
+        return True
 
     def load_puzzle(self, puzzle):
         """Record a puzzle load. Valid after nanoparticle scan."""
