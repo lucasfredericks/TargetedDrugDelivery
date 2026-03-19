@@ -68,6 +68,7 @@ class Simulation {
     this.bound = 0;
     this.attempts = 0;
     this.totalAbsorbed = 0;    // Running count — survives cell death/removal
+    this.triggeredDeaths = 0;  // Cells that crossed the death threshold
     this.initialCellCount = 0; // Cell count at test start, used as denominator
     this.theoreticalScore = 0; // Snapshotted at test start; stable for the duration of the test
   }
@@ -388,6 +389,7 @@ class Simulation {
     for (let cell of this.cells) {
       if (!cell.dying && !cell.dead && cell.absorbedDrugs >= this.deathThreshold) {
         cell.triggerDeath();
+        this.triggeredDeaths++;
         // Release all absorbed/absorbing particles in that cell to fade out
         for (let p of this.particles) {
           if ((p.absorbed || p.absorbing) && p.targetCell === cell) {
@@ -629,6 +631,7 @@ class Simulation {
     this.bound = 0;
     this.attempts = 0;
     this.totalAbsorbed = 0;
+    this.triggeredDeaths = 0;
     this.generateCells();
     this.initialCellCount = this.cells.length;
     this.theoreticalScore = this.computeTheoreticalScore();
@@ -653,6 +656,7 @@ class Simulation {
     this.bound = 0;
     this.attempts = 0;
     this.totalAbsorbed = 0;
+    this.triggeredDeaths = 0;
     this.generateCells();
     this.initialCellCount = this.cells.length;
     this.theoreticalScore = this.computeTheoreticalScore();
@@ -666,10 +670,9 @@ class Simulation {
   getStats() {
     const totalAbsorbedDrugs = this.totalAbsorbed;
 
-    // Score = dead cells / initial cell count, capped at 100%
-    const deadCells = this.cells.filter(c => c.dead || c.dying).length;
+    // Score = cells that crossed the death threshold / initial cell count, capped at 100%
     const absorptionEfficiency = this.initialCellCount > 0
-      ? Math.min(100, (deadCells / this.initialCellCount) * 100)
+      ? Math.min(100, (this.triggeredDeaths / this.initialCellCount) * 100)
       : 0;
 
     // Theoretical score is snapshotted at test start (or when ligands change outside a test)
@@ -679,6 +682,8 @@ class Simulation {
     return {
       bound: this.bound,
       attempts: this.attempts,
+      bindingEvents: totalAbsorbedDrugs,  // drugs that fully crossed the membrane
+      triggeredDeaths: this.triggeredDeaths,
       totalAbsorbedDrugs: totalAbsorbedDrugs,
       absorptionEfficiency: absorptionEfficiency,
       theoreticalScore: theoreticalScore,

@@ -361,7 +361,7 @@ function sendStats() {
       theoreticalScore: s.theoreticalScore,
       absorptionEfficiency: s.absorptionEfficiency,
       totalAbsorbedDrugs: s.totalAbsorbedDrugs,
-      bindingEvents: s.bound,
+      bindingEvents: s.bindingEvents,
       progress: testStatus.testMode
         ? Math.min(1, (testStatus.released - testStatus.freeFlowing) / Math.max(1, testStatus.total))
         : 0
