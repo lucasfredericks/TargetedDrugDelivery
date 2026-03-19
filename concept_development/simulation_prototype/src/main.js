@@ -263,7 +263,8 @@ function setupNetwork() {
 
   // Handle test start (from Pi master or dashboard)
   network.onStartTest((data) => {
-    console.log('Starting test mode');
+    console.log('Starting test mode, ligandPositions:', data?.ligandPositions,
+                'puzzle:', data?.puzzle?.id || data?.puzzle?.name);
 
     // In exhibit mode, apply received config before starting
     if (network.isExhibitMode && data) {
@@ -275,6 +276,7 @@ function setupNetwork() {
         for (let sim of simulations) {
           sim.setLigandPositions(globalParams.ligandPositions);
         }
+        console.log('Applied ligandPositions:', globalParams.ligandPositions);
       }
       if (typeof data.toxicity === 'number') {
         globalParams.toxicity = data.toxicity;
