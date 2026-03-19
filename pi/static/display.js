@@ -4,12 +4,12 @@
  */
 
 const LIGAND_COLORS_HEX = {
-    Red: "#e63946",
-    Blue: "#457b9d",
-    Green: "#2a9d8f",
-    Purple: "#9b59b6",
-    Orange: "#e67e22",
-    Yellow: "#f1c40f",
+    Red: "#FF0004",
+    Blue: "#0000FF",
+    Green: "#008F00",
+    Purple: "#7426B2",
+    Orange: "#FF4F00",
+    Yellow: "#F8ED00",
     None: "#444"
 };
 

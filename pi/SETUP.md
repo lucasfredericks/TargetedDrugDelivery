@@ -390,9 +390,10 @@ To also auto-start the display in Chromium, add to
 /etc/xdg/autostart/tdd-display.desktop:
 
     [Desktop Entry]
+    Version=1.0
     Type=Application
     Name=TDD Display
-    Exec=chromium-browser --kiosk http://localhost:5000/
+    Exec=chromium --kiosk http://localhost:5000/
     X-GNOME-Autostart-enabled=true
 
 
