@@ -173,7 +173,9 @@ def handle_disconnect():
 @socketio.on("register_client")
 def handle_register(data):
     """Simulation client registers and receives its tissue assignment."""
+    from flask_socketio import join_room
     sid = _sid()
+    join_room("sim_clients")
     client_manager.register(sid, data)
     assignment = client_manager.get_assignment(sid)
     emit("assignment", {"tissueIndices": assignment})
@@ -308,19 +310,18 @@ def action_start_test():
 
     client_manager.reset_all()
 
-    # Send test config to each client with its tissue assignment
+    # Broadcast test config to all sim clients via their room.
+    # Room-based emit is reliable from any thread; SID-targeted emit
+    # can silently fail when called from a non-eventlet OS thread.
     puzzle = state_machine.current_puzzle
     toxicity = puzzle.get("toxicity", DEFAULT_TOXICITY) if puzzle else DEFAULT_TOXICITY
 
-    for sid in client_manager.get_all_sids():
-        assignment = client_manager.get_assignment(sid)
-        socketio.emit("start_test", {
-            "ligandPositions": state_machine.ligand_positions,
-            "toxicity": toxicity,
-            "puzzle": puzzle,
-            "totalParticles": DEFAULT_PARTICLE_COUNT,
-            "assignment": {"tissueIndices": assignment}
-        }, to=sid)
+    socketio.emit("start_test", {
+        "ligandPositions": state_machine.ligand_positions,
+        "toxicity": toxicity,
+        "puzzle": puzzle,
+        "totalParticles": DEFAULT_PARTICLE_COUNT,
+    }, room="sim_clients")
 
     _emit_to_display("test_started", {
         "ligandPositions": state_machine.ligand_positions,
@@ -334,8 +335,8 @@ def action_reset():
     state_machine.reset()
     client_manager.reset_all()
 
-    # Tell clients to reset
-    socketio.emit("reset", {}, broadcast=True)
+    # Tell sim clients to reset
+    socketio.emit("reset", {}, room="sim_clients")
     _emit_to_display("state_reset", {})
     logger.info("Exhibit reset to IDLE")
 
