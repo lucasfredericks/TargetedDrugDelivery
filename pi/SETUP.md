@@ -258,13 +258,28 @@ Step 8: Network Setup
 
 For a self-contained exhibit network (no internet required):
 
+Note: Raspberry Pi OS Bookworm uses NetworkManager (nmcli), not dhcpcd.
+The dhcpcd.conf file may exist but has no effect.
+
 ### Option A: Static IP (simplest)
 
-Edit /etc/dhcpcd.conf on the Pi:
+Set a static IP on the Pi's Ethernet interface using nmcli:
 
-    interface eth0
-    static ip_address=192.168.1.1/24
-    nogateway
+    # Find the connection name (typically "Wired connection 1")
+    nmcli connection show
+
+    sudo nmcli connection modify "Wired connection 1" \
+      ipv4.method manual \
+      ipv4.addresses 192.168.1.1/24 \
+      ipv4.gateway "" \
+      ipv4.never-default yes
+
+    sudo nmcli connection up "Wired connection 1"
+
+Verify with:
+
+    ip addr show eth0
+    # Should show: inet 192.168.1.1/24
 
 Set each client computer to a static IP in the same subnet:
 - Client 1: 192.168.1.10
@@ -284,15 +299,9 @@ Edit /etc/dnsmasq.conf:
     interface=eth0
     dhcp-range=192.168.1.10,192.168.1.50,255.255.255.0,24h
 
-Edit /etc/dhcpcd.conf:
+Set the Pi's static IP using nmcli (same as Option A above), then
+restart services:
 
-    interface eth0
-    static ip_address=192.168.1.1/24
-    nogateway
-
-Restart services:
-
-    sudo systemctl restart dhcpcd
     sudo systemctl enable dnsmasq
     sudo systemctl start dnsmasq
 
