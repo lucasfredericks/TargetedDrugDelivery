@@ -366,10 +366,16 @@ function sendStats() {
 
   network.sendStats(stats);
 
-  // Check if all simulations are complete (test mode ended)
+  // Check if all simulations are complete: all particles released and
+  // either all particles resolved or 10 seconds elapsed since last release
   const allDone = simulations.every(sim => {
     const ts = sim.getTestStatus();
-    return !ts.testMode || (ts.released >= ts.total && sim.particles && sim.particles.length === 0);
+    if (!ts.testMode || ts.released < ts.total) return false;
+    // All particles gone — done
+    if (sim.particles.length === 0) return true;
+    // Timeout: 600 frames (~10s at 60fps) after last release for stuck particles
+    const framesSinceRelease = frameCount - sim.testStartFrame - sim.testDuration;
+    return framesSinceRelease > 600;
   });
   if (allDone && simulations.some(sim => sim.getTestStatus().released > 0)) {
     network.sendTestComplete(stats);

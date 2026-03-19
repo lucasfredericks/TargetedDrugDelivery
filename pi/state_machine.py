@@ -23,7 +23,7 @@ TRANSITIONS = {
     State.IDLE: {State.NANOPARTICLE_SCANNED},
     State.NANOPARTICLE_SCANNED: {State.PUZZLE_LOADED, State.NANOPARTICLE_SCANNED},
     State.PUZZLE_LOADED: {State.TESTING, State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED},
-    State.TESTING: {State.RESULTS},
+    State.TESTING: {State.RESULTS, State.TESTING},
     State.RESULTS: {State.IDLE},
 }
 
@@ -83,8 +83,8 @@ class ExhibitStateMachine:
         return False
 
     def start_test(self):
-        """Begin testing. Valid only when both nanoparticle and puzzle are loaded."""
-        if self.state == State.PUZZLE_LOADED:
+        """Begin testing. Valid from PUZZLE_LOADED or TESTING (restart)."""
+        if self.state in (State.PUZZLE_LOADED, State.TESTING):
             self.test_results = None
             return self.transition(State.TESTING)
         return False

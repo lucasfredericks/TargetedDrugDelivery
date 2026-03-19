@@ -267,16 +267,26 @@ class Simulation {
   updateTestModeSpawning(frameCount) {
     const elapsedFrames = frameCount - this.testStartFrame;
 
-    if (this.testParticlesReleased < this.testParticlesTotal && elapsedFrames < this.testDuration) {
-      // Use sine-based curve for smooth start and end
-      const progress = elapsedFrames / this.testDuration;
-      const targetReleased = Math.floor(this.testParticlesTotal * (1 - Math.cos(progress * Math.PI)) / 2);
-      const particlesToSpawn = Math.max(0, targetReleased - this.testParticlesReleased);
+    if (this.testParticlesReleased < this.testParticlesTotal) {
+      if (elapsedFrames < this.testDuration) {
+        // Use sine-based curve for smooth start and end
+        const progress = elapsedFrames / this.testDuration;
+        const targetReleased = Math.floor(this.testParticlesTotal * (1 - Math.cos(progress * Math.PI)) / 2);
+        const particlesToSpawn = Math.max(0, targetReleased - this.testParticlesReleased);
 
-      for (let i = 0; i < particlesToSpawn; i++) {
-        const particle = Particle.spawn(this.width, this.height, this.physicsParams.flowSpeed);
-        this.particles.push(particle);
-        this.testParticlesReleased++;
+        for (let i = 0; i < particlesToSpawn; i++) {
+          const particle = Particle.spawn(this.width, this.height, this.physicsParams.flowSpeed);
+          this.particles.push(particle);
+          this.testParticlesReleased++;
+        }
+      } else {
+        // Duration ended — release any remaining particles
+        const remaining = this.testParticlesTotal - this.testParticlesReleased;
+        for (let i = 0; i < remaining; i++) {
+          const particle = Particle.spawn(this.width, this.height, this.physicsParams.flowSpeed);
+          this.particles.push(particle);
+          this.testParticlesReleased++;
+        }
       }
     }
   }

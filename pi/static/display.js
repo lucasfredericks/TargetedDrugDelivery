@@ -19,6 +19,8 @@ const LIGAND_NAMES = ["Red", "Blue", "Green", "Purple", "Orange", "Yellow"];
 let currentLigands = null;
 let currentPuzzle = null;
 let currentResults = [];
+let tagPresent = false;
+let isTesting = false;
 
 // Socket.IO connection
 const socket = io();
@@ -35,7 +37,7 @@ socket.on("disconnect", () => {
 // --- Event Handlers ---
 
 socket.on("state_sync", (data) => {
-    updateStatus(data.state);
+    isTesting = data.state === "TESTING";
     if (data.ligandPositions) {
         currentLigands = data.ligandPositions;
         renderNanoparticle(data.ligandPositions, data.ligandColors);
@@ -47,22 +49,25 @@ socket.on("state_sync", (data) => {
     if (data.results) {
         renderResults(data.results);
     }
+    updateStatusFromState();
 });
 
 socket.on("nanoparticle_scanned", (data) => {
     currentLigands = data.ligandPositions;
+    tagPresent = !!data.tagPresent;
     renderNanoparticle(data.ligandPositions, data.colors, data.tagPresent);
-    updateStatus("NANOPARTICLE_SCANNED");
+    if (!isTesting) updateStatusFromState();
 });
 
 socket.on("puzzle_loaded", (data) => {
     currentPuzzle = data.puzzle;
     renderPuzzleInfo(data.puzzle);
-    updateStatus("PUZZLE_LOADED");
+    if (!isTesting) updateStatusFromState();
 });
 
 socket.on("test_started", () => {
-    updateStatus("TESTING");
+    isTesting = true;
+    updateStatusFromState();
 });
 
 socket.on("results_update", (data) => {
@@ -71,14 +76,17 @@ socket.on("results_update", (data) => {
 
 socket.on("test_complete", (data) => {
     renderResults(data.finalResults);
-    updateStatus("RESULTS");
+    isTesting = false;
+    updateStatusFromState();
 });
 
 socket.on("state_reset", () => {
     currentLigands = null;
     currentPuzzle = null;
     currentResults = [];
-    updateStatus("IDLE");
+    isTesting = false;
+    tagPresent = false;
+    updateStatusFromState();
     clearDisplay();
 });
 
@@ -96,6 +104,20 @@ function updateStatus(state) {
     const badge = document.getElementById("status-badge");
     badge.textContent = state.replace(/_/g, " ");
     badge.className = "status-badge status-" + state.toLowerCase();
+}
+
+function updateStatusFromState() {
+    const badge = document.getElementById("status-badge");
+    if (isTesting) {
+        badge.textContent = "Testing";
+        badge.className = "status-badge status-testing";
+    } else if (tagPresent) {
+        badge.textContent = "Ready";
+        badge.className = "status-badge status-ready";
+    } else {
+        badge.textContent = "Insert puzzle to test your nanoparticle";
+        badge.className = "status-badge status-waiting";
+    }
 }
 
 function renderNanoparticle(positions, colorNames, tagPresent) {

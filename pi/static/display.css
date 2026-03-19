@@ -36,11 +36,9 @@ header h1 {
     text-transform: uppercase;
 }
 
-.status-idle { background: #333; color: #999; }
-.status-nanoparticle_scanned { background: #2a4a2a; color: #6f6; }
-.status-puzzle_loaded { background: #2a3a5a; color: #6af; }
+.status-waiting { background: #333; color: #999; }
+.status-ready { background: #2a5a2a; color: #6f6; }
 .status-testing { background: #5a4a1a; color: #fd6; animation: pulse 1s infinite; }
-.status-results { background: #2a5a2a; color: #6f6; }
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
