@@ -288,9 +288,10 @@ def action_scan_rfid(uid=None):
     # Ensure state machine is ready — tag detection implies nanoparticle is
     # present even if the sensor poll hasn't run yet.
     if state_machine.state == State.IDLE:
+        from config import NUM_SENSORS, COLOR_NONE
         state_machine.scan_nanoparticle(
-            state_machine.ligand_positions or [],
-            state_machine.ligand_colors or [],
+            state_machine.ligand_positions or [COLOR_NONE] * NUM_SENSORS,
+            state_machine.ligand_colors or ["None"] * NUM_SENSORS,
         )
 
     state_machine.load_puzzle(puzzle)
