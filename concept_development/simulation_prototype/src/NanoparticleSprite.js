@@ -41,12 +41,9 @@ function generateParticleSprite(size, ligandPositions, toxicity) {
     const baseBy = baseCenterY - py * halfBase;
 
     const colorIdx = arrangement[i];
+    if (colorIdx === -1) continue;
     g.noStroke();
-    if (colorIdx === -1) {
-      g.fill('#e6e6e6');
-    } else {
-      g.fill(colorForIndex(colorIdx));
-    }
+    g.fill(colorForIndex(colorIdx));
     g.triangle(tipX, tipY, baseAx, baseAy, baseBx, baseBy);
   }
 
