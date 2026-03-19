@@ -14,6 +14,7 @@ import argparse
 import json as _json
 import logging
 import os
+import queue
 import sys
 import threading
 
@@ -43,6 +44,7 @@ client_manager = ClientManager()
 sensor_service = None     # Pi I2C color sensors
 arduino_rfid = None       # Arduino PN532 RFID + start button
 _sensor_lock = threading.Lock()  # Prevents concurrent I2C reads from multiple threads
+_action_queue = queue.Queue()    # OS threads enqueue; eventlet greenlet dispatches
 
 
 # --- HTTP Routes ---
@@ -377,6 +379,25 @@ def _emit_to_display(event, data):
 
 # --- Background Tasks ---
 
+def _action_dispatch_loop():
+    """Eventlet greenlet that dispatches actions queued by OS threads.
+
+    Arduino callbacks run in a plain OS thread where socketio.emit is
+    unreliable for reaching remote clients.  Routing actions through this
+    greenlet ensures all emits happen inside the eventlet event loop.
+    """
+    while True:
+        socketio.sleep(0.05)
+        while not _action_queue.empty():
+            try:
+                action = _action_queue.get_nowait()
+                action()
+            except queue.Empty:
+                break
+            except Exception as e:
+                logger.error("Action dispatch error: %s", e)
+
+
 def _do_sensor_read(svc):
     """Read all sensors under the lock. Runs in a real OS thread via tpool."""
     with _sensor_lock:
@@ -436,6 +457,10 @@ def main():
                         help="Skip RFID/Arduino initialization")
     args = parser.parse_args()
 
+    # Start the action dispatcher greenlet — routes Arduino OS-thread
+    # callbacks into the eventlet loop where socketio.emit works reliably.
+    socketio.start_background_task(_action_dispatch_loop)
+
     if args.no_hardware:
         logger.info("Running without hardware (display/network only)")
 
@@ -467,19 +492,26 @@ def main():
                 logger.error("Arduino not connected. Use --no-rfid to skip.")
                 arduino_rfid = None
             else:
-                # Callbacks fire in the Arduino reader thread.
-                # socketio.emit is thread-safe; puzzle loading is just
-                # a file read — no background task needed.
+                # Callbacks fire in the Arduino reader thread (plain OS
+                # thread).  socketio.emit from OS threads is unreliable for
+                # remote clients, so we enqueue actions for the eventlet
+                # dispatcher greenlet.
                 def _on_tag(uid):
-                    socketio.emit("admin_tag", {"uid": uid}, room="admin")
-                    action_scan_rfid(uid)
+                    _action_queue.put(lambda u=uid: (
+                        socketio.emit("admin_tag", {"uid": u}, room="admin"),
+                        action_scan_rfid(u),
+                    ))
                 arduino_rfid.on_tag(_on_tag)
                 # Tag removed → notify admin
                 arduino_rfid.on_tag_removed(
-                    lambda: socketio.emit("admin_tag_removed", {}, room="admin")
+                    lambda: _action_queue.put(
+                        lambda: socketio.emit("admin_tag_removed", {}, room="admin")
+                    )
                 )
                 # Start button → start test
-                arduino_rfid.on_start(action_start_test)
+                arduino_rfid.on_start(
+                    lambda: _action_queue.put(action_start_test)
+                )
                 logger.info("Arduino RFID/button ready")
 
     logger.info("Starting master server on %s:%d", SERVER_HOST, SERVER_PORT)
