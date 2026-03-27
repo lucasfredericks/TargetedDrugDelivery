@@ -126,6 +126,9 @@ function createSimulations() {
   }
 }
 
+// Frame timing profiler — logs average phase durations every 120 frames
+const _frameTiming = { update: 0, render: 0, composite: 0, frameTotal: 0, lastFrameEnd: 0, frames: 0 };
+
 function draw() {
   background(250);
 
@@ -135,21 +138,57 @@ function draw() {
     const area = displayAreas[i];
 
     // Update simulation
+    const t0 = performance.now();
     sim.update(frameCount);
+    const t1 = performance.now();
 
     // Render to buffer
     sim.render();
+    const t2 = performance.now();
 
     // Draw buffer to main canvas (downscaled for 2x2 grid)
     const buffer = sim.getBuffer();
     if (buffer) {
       image(buffer, area.x, area.y, area.w, area.h);
     }
+    const t3 = performance.now();
+
+    _frameTiming.update += (t1 - t0);
+    _frameTiming.render += (t2 - t1);
+    _frameTiming.composite += (t3 - t2);
+    _frameTiming.frames++;
 
     // Draw labels (multi-tissue mode only)
     if (!singleTissueMode) {
       drawTissueLabel(sim, area);
     }
+  }
+
+  // Track frame-to-frame time (captures deferred GPU work + browser overhead)
+  const frameEnd = performance.now();
+  if (_frameTiming.lastFrameEnd > 0) {
+    _frameTiming.frameTotal += (frameEnd - _frameTiming.lastFrameEnd);
+  }
+  _frameTiming.lastFrameEnd = frameEnd;
+
+  // Log averages every 120 frames (~2 seconds)
+  if (_frameTiming.frames >= 120) {
+    const n = _frameTiming.frames;
+    const measuredWork = (_frameTiming.update + _frameTiming.render + _frameTiming.composite) / n;
+    const actualFrame = _frameTiming.frameTotal / n;
+    console.log(
+      `[perf] update: ${(_frameTiming.update / n).toFixed(2)}ms | ` +
+      `render: ${(_frameTiming.render / n).toFixed(2)}ms | ` +
+      `composite: ${(_frameTiming.composite / n).toFixed(2)}ms | ` +
+      `measured: ${measuredWork.toFixed(2)}ms | ` +
+      `actual frame: ${actualFrame.toFixed(2)}ms | ` +
+      `gap: ${(actualFrame - measuredWork).toFixed(2)}ms`
+    );
+    _frameTiming.update = 0;
+    _frameTiming.render = 0;
+    _frameTiming.composite = 0;
+    _frameTiming.frameTotal = 0;
+    _frameTiming.frames = 0;
   }
 
   // Draw status bar at bottom
@@ -213,15 +252,17 @@ function drawStatusBar() {
   else if (showingVelocity) vizLabel = ' [Viz: V]';
   else if (showingPressure) vizLabel = ' [Viz: P]';
 
+  const fpsLabel = ` | FPS: ${frameRate().toFixed(1)}`;
+
   if (testMode) {
     text(
-      `TEST MODE${fluidLabel}${vizLabel}: ${totalReleased}/${totalTarget} released | Particles: ${totalParticles} (${freeParticles} flowing, ${boundParticles} bound)`,
+      `TEST MODE${fluidLabel}${vizLabel}: ${totalReleased}/${totalTarget} released | Particles: ${totalParticles} (${freeParticles} flowing, ${boundParticles} bound)${fpsLabel}`,
       width / 2,
       height - 8
     );
   } else {
     const hint = useFluidSim ? ' Press V/P to toggle velocity/pressure field.' : '';
-    text(`Ready${fluidLabel}${vizLabel}. Press Test button on dashboard to begin.${hint}`, width / 2, height - 8);
+    text(`Ready${fluidLabel}${vizLabel}. Press Test button on dashboard to begin.${hint}${fpsLabel}`, width / 2, height - 8);
   }
 }
 

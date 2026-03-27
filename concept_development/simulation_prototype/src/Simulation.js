@@ -214,6 +214,9 @@ class Simulation {
     if (this.fluidSim && this.fluidSim.initialized) {
       this.fluidSim.uploadBoundaries(this.cells);
     }
+
+    // Rebuild spatial hash grid for collision detection
+    this.buildCellGrid();
   }
 
   /**
@@ -225,6 +228,73 @@ class Simulation {
       this.ligandPositions,
       this.toxicity
     );
+  }
+
+  // --- Spatial hash grid for O(1) cell lookup ---
+
+  /**
+   * Build a flat spatial hash grid mapping grid-cell buckets to overlapping cells.
+   * Each cell object is inserted into every bucket its bounding circle overlaps.
+   * Grid cell size of 200px means particles check a 3x3 neighborhood (~4-6 candidates
+   * max) instead of scanning all 15-30 cells in the simulation.
+   * Call after generateCells() and whenever the cells array changes.
+   */
+  buildCellGrid() {
+    this.gridCellSize = 200; // px — larger than max cell radius (~156px) with margin
+    this.gridW = Math.ceil(this.width / this.gridCellSize);
+    this.gridH = Math.ceil(this.height / this.gridCellSize);
+    this.cellGrid = new Array(this.gridW * this.gridH).fill(null);
+
+    for (const cell of this.cells) {
+      const minGX = Math.max(0, Math.floor((cell.cx - cell.radius) / this.gridCellSize));
+      const maxGX = Math.min(this.gridW - 1, Math.floor((cell.cx + cell.radius) / this.gridCellSize));
+      const minGY = Math.max(0, Math.floor((cell.cy - cell.radius) / this.gridCellSize));
+      const maxGY = Math.min(this.gridH - 1, Math.floor((cell.cy + cell.radius) / this.gridCellSize));
+
+      for (let gy = minGY; gy <= maxGY; gy++) {
+        for (let gx = minGX; gx <= maxGX; gx++) {
+          const idx = gy * this.gridW + gx;
+          if (!this.cellGrid[idx]) this.cellGrid[idx] = [];
+          this.cellGrid[idx].push(cell);
+        }
+      }
+    }
+  }
+
+  /**
+   * Return candidate cells near (x, y) by querying a 3x3 neighborhood of grid buckets.
+   * Reduces particle-cell collision checks from O(allCells) to O(~4-6 cells).
+   *
+   * @param {number} x - World x coordinate
+   * @param {number} y - World y coordinate
+   * @param {boolean} liveOnly - If true, exclude dying/dead cells (default: true)
+   * @returns {Cell[]} Candidate cells that may be within collision range
+   */
+  getCandidateCells(x, y, liveOnly = true) {
+    if (!this.cellGrid) {
+      // Fallback before grid is built (should not happen in normal flow)
+      return liveOnly ? this.cells.filter(c => !c.dying && !c.dead) : this.cells.slice();
+    }
+
+    const result = [];
+    const gx0 = Math.floor(x / this.gridCellSize);
+    const gy0 = Math.floor(y / this.gridCellSize);
+
+    for (let dgy = -1; dgy <= 1; dgy++) {
+      for (let dgx = -1; dgx <= 1; dgx++) {
+        const ngx = gx0 + dgx;
+        const ngy = gy0 + dgy;
+        if (ngx < 0 || ngx >= this.gridW || ngy < 0 || ngy >= this.gridH) continue;
+        const bucket = this.cellGrid[ngy * this.gridW + ngx];
+        if (!bucket) continue;
+        for (const cell of bucket) {
+          if (liveOnly && (cell.dying || cell.dead)) continue;
+          if (!result.includes(cell)) result.push(cell);
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -250,7 +320,9 @@ class Simulation {
       cell.update(this.physicsParams, frameCount, this.fluidSim);
     }
     // Remove cells whose death animation has fully completed
+    const prevCellCount = this.cells.length;
     this.cells = this.cells.filter(c => !c.isFullyDead());
+    if (this.cells.length !== prevCellCount) this.buildCellGrid();
 
     // Update particle physics
     this.updateParticles(frameCount);
@@ -315,9 +387,8 @@ class Simulation {
         continue;
       }
 
-      // Check collision with live cells only (skip dying/dead)
-      const liveCells = this.cells.filter(c => !c.dying && !c.dead);
-      const nearestCell = findNearestCollidingCell(p, liveCells, spriteRadius);
+      // Check collision with live cells only — spatial hash returns only nearby candidates
+      const nearestCell = findNearestCollidingCell(p, this.getCandidateCells(p.x, p.y), spriteRadius);
 
       if (nearestCell) {
         this.attempts++;
@@ -409,7 +480,7 @@ class Simulation {
   updateDebris(frameCount) {
     for (let i = this.debris.length - 1; i >= 0; i--) {
       const d = this.debris[i];
-      d.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim, this.cells);
+      d.update(this.physicsParams, this.width, this.height, frameCount, this.fluidSim, this.getCandidateCells(d.x, d.y, false));
 
       if (d.isOutOfBounds(this.width, this.height) || d.isExpired()) {
         this.debris.splice(i, 1);
@@ -476,21 +547,45 @@ class Simulation {
     }
 
     // Render tracer particles (behind cells for depth)
+    const rt0 = performance.now();
     this.renderTracers();
+    const rt1 = performance.now();
 
     // Render cells
     for (let cell of this.cells) {
       cell.render(this.buffer);
       cell.renderBindingOverlay(this.buffer, this.testMode);
     }
+    const rt2 = performance.now();
 
     // Render debris (behind particles)
     this.renderDebris();
+    const rt3 = performance.now();
 
     // Render particles
     this.renderParticles();
+    const rt4 = performance.now();
 
     this.buffer.pop();
+
+    // Accumulate render sub-phase timings
+    if (!this._renderTiming) this._renderTiming = { tracers: 0, cells: 0, debris: 0, particles: 0, frames: 0 };
+    this._renderTiming.tracers += (rt1 - rt0);
+    this._renderTiming.cells += (rt2 - rt1);
+    this._renderTiming.debris += (rt3 - rt2);
+    this._renderTiming.particles += (rt4 - rt3);
+    this._renderTiming.frames++;
+    if (this._renderTiming.frames >= 120) {
+      const n = this._renderTiming.frames;
+      console.log(
+        `[render breakdown] tracers: ${(this._renderTiming.tracers / n).toFixed(2)}ms | ` +
+        `cells: ${(this._renderTiming.cells / n).toFixed(2)}ms | ` +
+        `debris: ${(this._renderTiming.debris / n).toFixed(2)}ms | ` +
+        `particles: ${(this._renderTiming.particles / n).toFixed(2)}ms | ` +
+        `tracer count: ${this.tracers.length} | particle count: ${this.particles.length}`
+      );
+      this._renderTiming = { tracers: 0, cells: 0, debris: 0, particles: 0, frames: 0 };
+    }
   }
 
   /**
@@ -512,12 +607,92 @@ class Simulation {
   }
 
   /**
-   * Render tracer particles to buffer
+   * Render tracer particles to buffer using batched Canvas 2D paths.
+   * Groups trail segments and dots by quantized alpha, then draws each group
+   * as a single path — reducing ~54,000 individual draw calls to ~16 batched paths.
    */
   renderTracers() {
-    for (let t of this.tracers) {
-      t.render(this.buffer);
+    if (typeof TracerParticle === 'undefined' || this.tracers.length === 0) return;
+
+    const ctx = this.buffer.drawingContext;
+    const BUCKETS = 8;
+    const BUCKET_SCALE = BUCKETS / 256;
+
+    // Reuse persistent bucket arrays to avoid GC pressure
+    if (!this._trailBuckets) {
+      this._trailBuckets = new Array(BUCKETS);
+      this._dotBuckets = new Array(BUCKETS);
+      for (let b = 0; b < BUCKETS; b++) {
+        this._trailBuckets[b] = [];
+        this._dotBuckets[b] = [];
+      }
     }
+    for (let b = 0; b < BUCKETS; b++) {
+      this._trailBuckets[b].length = 0;
+      this._dotBuckets[b].length = 0;
+    }
+
+    // Classify all tracer segments and dots into alpha buckets
+    for (let ti = 0; ti < this.tracers.length; ti++) {
+      const t = this.tracers[ti];
+      const fadeIn = Math.min(1, t.age / 10);
+      const remaining = t.lifetime - t.age;
+      const fadeOut = Math.min(1, remaining / 30);
+      const baseAlpha = fadeIn * fadeOut;
+      if (baseAlpha <= 0) continue;
+
+      // Trail line segments
+      if (t.trail.length > 1) {
+        for (let i = 1; i < t.trail.length; i++) {
+          const a = (i / t.trail.length) * baseAlpha * 40;
+          const b = Math.min(BUCKETS - 1, (a * BUCKET_SCALE) | 0);
+          this._trailBuckets[b].push(
+            t.trail[i - 1].x, t.trail[i - 1].y,
+            t.trail[i].x, t.trail[i].y
+          );
+        }
+        // Segment from last trail point to current position
+        const a = baseAlpha * 50;
+        const b = Math.min(BUCKETS - 1, (a * BUCKET_SCALE) | 0);
+        const last = t.trail[t.trail.length - 1];
+        this._trailBuckets[b].push(last.x, last.y, t.x, t.y);
+      }
+
+      // Dot
+      const dotAlpha = baseAlpha * 70;
+      const db = Math.min(BUCKETS - 1, (dotAlpha * BUCKET_SCALE) | 0);
+      this._dotBuckets[db].push(t.x, t.y);
+    }
+
+    // Draw line segments — one batched path per alpha bucket
+    ctx.lineWidth = 1;
+    for (let b = 0; b < BUCKETS; b++) {
+      const segs = this._trailBuckets[b];
+      if (segs.length === 0) continue;
+      const alpha = (b + 0.5) / BUCKETS;
+      ctx.strokeStyle = `rgba(200,210,230,${alpha})`;
+      ctx.beginPath();
+      for (let j = 0; j < segs.length; j += 4) {
+        ctx.moveTo(segs[j], segs[j + 1]);
+        ctx.lineTo(segs[j + 2], segs[j + 3]);
+      }
+      ctx.stroke();
+    }
+
+    // Draw dots — one batched fill per alpha bucket
+    for (let b = 0; b < BUCKETS; b++) {
+      const dots = this._dotBuckets[b];
+      if (dots.length === 0) continue;
+      const alpha = (b + 0.5) / BUCKETS;
+      ctx.fillStyle = `rgba(210,220,240,${alpha})`;
+      ctx.beginPath();
+      for (let j = 0; j < dots.length; j += 2) {
+        ctx.moveTo(dots[j] + 1, dots[j + 1]);
+        ctx.arc(dots[j], dots[j + 1], 1, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+
     this.buffer.noStroke();
   }
 

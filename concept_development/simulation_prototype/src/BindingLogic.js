@@ -374,28 +374,30 @@ function findNearestMatchingReceptor(particle, cell, ligandCounts) {
 function isCollidingWithCell(particle, cell, spriteRadius) {
   const dx = particle.x - cell.cx;
   const dy = particle.y - cell.cy;
-  const d = Math.sqrt(dx * dx + dy * dy);
   const collisionDistance = cell.radius + spriteRadius + 2;
-  return d < collisionDistance;
+  return dx * dx + dy * dy < collisionDistance * collisionDistance;
 }
 
-// Find nearest cell that particle is colliding with
+// Find nearest cell that particle is colliding with.
+// Uses squared-distance comparison throughout — sqrt is never called.
 function findNearestCollidingCell(particle, cells, spriteRadius) {
   let nearestCell = null;
-  let nearestDist = Infinity;
+  let nearestDistSq = Infinity;
 
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
     const dx = particle.x - cell.cx;
     const dy = particle.y - cell.cy;
-    const d = Math.sqrt(dx * dx + dy * dy);
+    const distSq = dx * dx + dy * dy;
     const collisionDistance = cell.radius + spriteRadius + 2;
+    const collisionDistSq = collisionDistance * collisionDistance;
 
-    if (d < collisionDistance && d < nearestDist) {
-      nearestCell = cell;
-      nearestDist = d;
-      particle.cellIndex = i;
-    }
+    // Reject outside collision range or farther than current nearest — no sqrt needed
+    if (distSq >= collisionDistSq || distSq >= nearestDistSq) continue;
+
+    nearestCell = cell;
+    nearestDistSq = distSq;
+    particle.cellIndex = i;
   }
 
   return nearestCell;

@@ -80,18 +80,18 @@ class Debris {
       for (let cell of cells) {
         const dx = this.x - cell.cx;
         const dy = this.y - cell.cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
         const minDist = cell.radius + 4;
-        if (dist < minDist) {
-          const nx = dx / (dist || 1);
-          const ny = dy / (dist || 1);
-          this.x = cell.cx + nx * (minDist + 1);
-          this.y = cell.cy + ny * (minDist + 1);
-          const vDotN = this.vx * nx + this.vy * ny;
-          if (vDotN < 0) {
-            this.vx -= 2 * vDotN * nx;
-            this.vy -= 2 * vDotN * ny;
-          }
+        // Early rejection: skip sqrt when clearly outside collision range
+        if (dx * dx + dy * dy >= minDist * minDist) continue;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        this.x = cell.cx + nx * (minDist + 1);
+        this.y = cell.cy + ny * (minDist + 1);
+        const vDotN = this.vx * nx + this.vy * ny;
+        if (vDotN < 0) {
+          this.vx -= 2 * vDotN * nx;
+          this.vy -= 2 * vDotN * ny;
         }
       }
     }
