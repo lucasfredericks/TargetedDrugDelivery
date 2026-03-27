@@ -501,15 +501,24 @@ class Simulation {
 
       // Recycle expired or out-of-bounds tracers
       if (t.isExpired() || t.isOutOfBounds(this.width, this.height)) {
-        this.tracers[i] = TracerParticle.spawnLeft(
-          this.width, this.height, this.physicsParams.flowSpeed
-        );
+        // Out-of-bounds particles exited the canvas — re-enter from the left.
+        // Expired particles died naturally mid-canvas — respawn randomly so
+        // tracers stay distributed across the full width, not just the left side.
+        if (t.isOutOfBounds(this.width, this.height)) {
+          this.tracers[i] = TracerParticle.spawnLeft(
+            this.width, this.height, this.physicsParams.flowSpeed
+          );
+        } else {
+          this.tracers[i] = TracerParticle.spawnRandom(
+            this.width, this.height, this.physicsParams.flowSpeed
+          );
+        }
       }
     }
 
     // Top up if below target count
     while (this.tracers.length < this.tracerCount) {
-      this.tracers.push(TracerParticle.spawnLeft(
+      this.tracers.push(TracerParticle.spawnRandom(
         this.width, this.height, this.physicsParams.flowSpeed
       ));
     }
@@ -644,7 +653,7 @@ class Simulation {
       // Trail line segments
       if (t.trail.length > 1) {
         for (let i = 1; i < t.trail.length; i++) {
-          const a = (i / t.trail.length) * baseAlpha * 40;
+          const a = (i / t.trail.length) * baseAlpha * 80;
           const b = Math.min(BUCKETS - 1, (a * BUCKET_SCALE) | 0);
           this._trailBuckets[b].push(
             t.trail[i - 1].x, t.trail[i - 1].y,
@@ -652,14 +661,14 @@ class Simulation {
           );
         }
         // Segment from last trail point to current position
-        const a = baseAlpha * 50;
+        const a = baseAlpha * 100;
         const b = Math.min(BUCKETS - 1, (a * BUCKET_SCALE) | 0);
         const last = t.trail[t.trail.length - 1];
         this._trailBuckets[b].push(last.x, last.y, t.x, t.y);
       }
 
       // Dot
-      const dotAlpha = baseAlpha * 70;
+      const dotAlpha = baseAlpha * 140;
       const db = Math.min(BUCKETS - 1, (dotAlpha * BUCKET_SCALE) | 0);
       this._dotBuckets[db].push(t.x, t.y);
     }

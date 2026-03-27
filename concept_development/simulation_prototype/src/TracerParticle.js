@@ -118,7 +118,7 @@ class TracerParticle {
     // Draw trail lines (fading from old to new)
     if (this.trail.length > 1) {
       for (let i = 1; i < this.trail.length; i++) {
-        const trailAlpha = (i / this.trail.length) * baseAlpha * 40;
+        const trailAlpha = (i / this.trail.length) * baseAlpha * 80;
         g.stroke(200, 210, 230, trailAlpha);
         g.strokeWeight(1);
         g.line(this.trail[i - 1].x, this.trail[i - 1].y,
@@ -126,7 +126,7 @@ class TracerParticle {
       }
 
       // Line from last trail point to current position
-      const trailAlpha = baseAlpha * 50;
+      const trailAlpha = baseAlpha * 100;
       g.stroke(200, 210, 230, trailAlpha);
       g.strokeWeight(1);
       const last = this.trail[this.trail.length - 1];
@@ -134,7 +134,7 @@ class TracerParticle {
     }
 
     // Draw dot
-    const dotAlpha = baseAlpha * 70;
+    const dotAlpha = baseAlpha * 140;
     g.noStroke();
     g.fill(210, 220, 240, dotAlpha);
     g.circle(this.x, this.y, 2);
