@@ -504,7 +504,7 @@ class Cell {
 
   // Render absorbed drug count overlay (for test mode)
   renderBindingOverlay(g, showOverlay) {
-    if (!showOverlay || this.absorbedDrugs === 0 || this.dying || this.dead) return;
+    return; // Text disabled for kiosk display
 
     const count = this.absorbedDrugs;
 

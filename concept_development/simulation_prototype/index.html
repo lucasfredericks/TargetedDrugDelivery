@@ -4,17 +4,11 @@
   <meta charset="utf-8">
   <title>Targeted Drug Delivery — Simulation Prototype</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 12px; }
-    #controls { margin-bottom: 8px; }
-    canvas { border: 1px solid #ccc; display:block; }
-    .tissue { margin-right:12px; display:inline-block }
+    html,body{height:100%;margin:0;overflow:hidden;background:#000}
+    canvas{display:block}
   </style>
 </head>
 <body>
-  <h3>Targeted Drug Delivery — Simulation</h3>
-  <div style="font-size:13px;color:#666;margin-bottom:8px">Controls moved to dashboard — open <em>dashboard.html</em> to edit ligands and parameters.</div>
-
-  <div id="scoreboard"></div>
 
   <script src="lib/p5.min.js"></script>
   <!-- Socket.IO client (used when ?server= URL param is set for exhibit mode) -->
