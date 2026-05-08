@@ -64,7 +64,22 @@ const SOFT_BODY_DEFAULTS = {
   angularDamping: 0.8,        // Fraction of rigid-body angular velocity removed per frame (0=none, 1=full)
   volumeStiffness: 0.06,      // Pressure force proportional to area deficit (prevents C-shape collapse)
   maxEdgeStretch: 0.95,        // Hard upper limit on edge length as a multiple of rest length
+  tumorNoiseAmplitude: 0.5,  // Perlin noise amplitude for tumor cell shape (±20%)
+  normalNoiseAmplitude: 0.08, // Perlin noise amplitude for non-tumor cell shape (±8%)
+  breathPeriodFrames: 300,    // Period of slow membrane breathing (~5s at 60fps)
+  breathAmplitude: 0.02,      // Fractional radius/area swing during breath cycle (±2%)
+  neighborRepulsionStrength: 0.08, // Per-pixel-overlap force for cell-cell contact flattening
+  neighborRepulsionMargin: 30,     // px buffer beyond r1+r2 where soft contact engages
   enabled: true
+};
+
+// Per-tissue color palette: fill (membrane interior) and stroke (outline / death segments)
+const TISSUE_COLORS = {
+  tumor:   { fill: [240, 200, 200, 180], stroke: [140,  80,  90, 140] },
+  heart:   { fill: [230, 200, 210, 180], stroke: [130,  80,  95, 140] },
+  liver:   { fill: [210, 200, 170, 180], stroke: [110, 100,  70, 140] },
+  lung:    { fill: [210, 225, 240, 180], stroke: [ 90, 110, 130, 140] },
+  default: { fill: [220, 230, 240, 180], stroke: [100, 100, 120, 120] }
 };
 
 // Export for browser global
@@ -76,3 +91,4 @@ window.EXPRESSION_SCALING = EXPRESSION_SCALING;
 window.RENDER_RESOLUTION = RENDER_RESOLUTION;
 window.LAYOUT_DEFAULTS = LAYOUT_DEFAULTS;
 window.SOFT_BODY_DEFAULTS = SOFT_BODY_DEFAULTS;
+window.TISSUE_COLORS = TISSUE_COLORS;

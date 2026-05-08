@@ -45,6 +45,7 @@ class Simulation {
     this.cells = [];
     this.buffer = null;
     this.particleSprite = null;
+    this.spriteCache = new Map();  // key: ligandPositions.join(','), value: p5.Graphics
     this.initialized = false;
 
     // GPU fluid simulation (optional)
@@ -168,6 +169,10 @@ class Simulation {
     // Clamp to reasonable range
     const cellCount = Math.max(5, Math.min(80, targetCellCount));
 
+    // Resolve tissue color once per simulation — all cells in this tissue share it
+    const tissueKey = (this.tissue.name || '').toLowerCase();
+    const tissueColor = TISSUE_COLORS[tissueKey] || TISSUE_COLORS.default;
+
     for (let i = 0; i < cellCount; i++) {
       let placed = false;
       let attemptCount = 0;
@@ -187,7 +192,7 @@ class Simulation {
 
         // Create cell with receptor concentrations (constructor calculates actual radius)
         const isTumor = this.tissue.name.toLowerCase().includes('tumor');
-        const cell = new Cell(cx, cy, baseRadius, seed, this.tissue.receptors, isTumor);
+        const cell = new Cell(cx, cy, baseRadius, seed, this.tissue.receptors, isTumor, tissueColor);
         // Store base radius on cell for later updates
         cell.baseRadius = baseRadius;
 
@@ -224,11 +229,32 @@ class Simulation {
    * Regenerate particle sprite based on current ligand configuration
    */
   regenerateSprite() {
+    this.spriteCache.clear();
     this.particleSprite = generateParticleSprite(
       this.physicsParams.particleSpriteSize,
       this.ligandPositions,
       this.toxicity
     );
+  }
+
+  _randomizeLigandPositions(canonical) {
+    const arr = canonical.slice();
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  _getSpriteForArrangement(ligandPositions) {
+    const key = ligandPositions.join(',');
+    if (!this.spriteCache.has(key)) {
+      this.spriteCache.set(
+        key,
+        generateParticleSprite(this.physicsParams.particleSpriteSize, ligandPositions, this.toxicity)
+      );
+    }
+    return this.spriteCache.get(key);
   }
 
   // --- Spatial hash grid for O(1) cell lookup ---
@@ -320,6 +346,49 @@ class Simulation {
     for (let cell of this.cells) {
       cell.update(this.physicsParams, frameCount, this.fluidSim);
     }
+
+    // Cell-cell neighbor repulsion — soft contact forces produce tissue-like flattening
+    // where neighbours touch.  Forces are weighted by each node's facing direction so the
+    // membrane deforms locally at the contact point rather than translating as a rigid body.
+    {
+      const repK = SOFT_BODY_DEFAULTS.neighborRepulsionStrength;
+      const repMargin = SOFT_BODY_DEFAULTS.neighborRepulsionMargin;
+      const liveCells = this.cells.filter(c => !c.dying && !c.dead);
+      for (let a = 0; a < liveCells.length; a++) {
+        const ca = liveCells[a];
+        for (let b = a + 1; b < liveCells.length; b++) {
+          const cb = liveCells[b];
+          const dx = cb.cx - ca.cx;
+          const dy = cb.cy - ca.cy;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+          const minDist = ca.radius + cb.radius + repMargin;
+          if (dist >= minDist) continue;
+
+          const overlap = minDist - dist;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const forceMag = overlap * repK;
+
+          // Push only ca's nodes facing cb (positive dot with +n)
+          for (const node of ca.nodes) {
+            const facing = ((node.x - ca.cx) * nx + (node.y - ca.cy) * ny) / ca.radius;
+            if (facing > 0) {
+              node.vx -= nx * forceMag * facing;
+              node.vy -= ny * forceMag * facing;
+            }
+          }
+          // Push only cb's nodes facing ca (positive dot with -n)
+          for (const node of cb.nodes) {
+            const facing = -((node.x - cb.cx) * nx + (node.y - cb.cy) * ny) / cb.radius;
+            if (facing > 0) {
+              node.vx += nx * forceMag * facing;
+              node.vy += ny * forceMag * facing;
+            }
+          }
+        }
+      }
+    }
+
     // Remove cells whose death animation has fully completed
     const prevCellCount = this.cells.length;
     this.cells = this.cells.filter(c => !c.isFullyDead());
@@ -350,6 +419,8 @@ class Simulation {
 
         for (let i = 0; i < particlesToSpawn; i++) {
           const particle = Particle.spawn(this.width, this.height, this.physicsParams.flowSpeed);
+          particle.ligandPositions = this._randomizeLigandPositions(this.ligandPositions);
+          particle.sprite = this._getSpriteForArrangement(particle.ligandPositions);
           this.particles.push(particle);
           this.testParticlesReleased++;
         }
@@ -358,6 +429,8 @@ class Simulation {
         const remaining = this.testParticlesTotal - this.testParticlesReleased;
         for (let i = 0; i < remaining; i++) {
           const particle = Particle.spawn(this.width, this.height, this.physicsParams.flowSpeed);
+          particle.ligandPositions = this._randomizeLigandPositions(this.ligandPositions);
+          particle.sprite = this._getSpriteForArrangement(particle.ligandPositions);
           this.particles.push(particle);
           this.testParticlesReleased++;
         }
@@ -398,7 +471,7 @@ class Simulation {
         const result = attemptNodeBinding(
           p,
           nearestCell,
-          this.ligandPositions,
+          p.ligandPositions,
           spriteSize
         );
 
@@ -420,7 +493,7 @@ class Simulation {
           }
 
           // Spawn debris from the ligands before absorption
-          const newDebris = Debris.spawnFromParticle(p, this.ligandPositions, spriteSize);
+          const newDebris = Debris.spawnFromParticle(p, p.ligandPositions, spriteSize);
           this.debris.push(...newDebris);
 
           // Start drug absorption toward cell center
@@ -603,7 +676,7 @@ class Simulation {
    */
   renderParticles() {
     for (let p of this.particles) {
-      p.render(this.buffer, this.particleSprite, this.physicsParams.particleSpriteSize, this.toxicity);
+      p.render(this.buffer, p.sprite, this.physicsParams.particleSpriteSize, this.toxicity);
     }
   }
 

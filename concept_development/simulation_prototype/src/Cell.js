@@ -1,11 +1,12 @@
 // Cell.js - Cell entity with organic shape generation and receptor management
 
 class Cell {
-  constructor(cx, cy, baseRadius, seed, receptorConcentrations, isTumor = false) {
+  constructor(cx, cy, baseRadius, seed, receptorConcentrations, isTumor = false, tissueColor = null) {
     this.cx = cx;
     this.cy = cy;
     this.seed = seed;
     this.isTumor = isTumor;
+    this.tissueColor = tissueColor || TISSUE_COLORS.default;
     this.bendingSprings = [];
     this.receptors = [];    // Array of Receptor objects
     this.receptorNodes = []; // Array of {angle, x, y, pairId} - nodes between adjacent receptors
@@ -41,8 +42,14 @@ class Cell {
     const { minShapePoints } = EXPRESSION_SCALING;
     this.numShapePoints = Math.max(minShapePoints, this.totalReceptorsNeeded);
 
-    // Generate shape — organic Perlin for tumor cells, clean circle for all others
-    this.shape = Cell.generateShape(cx, cy, this.radius, seed, this.numShapePoints, this.isTumor);
+    // Generate shape — Perlin amplitude differs for tumor (lumpy) vs. normal (gently irregular)
+    const noiseAmp = this.isTumor
+      ? SOFT_BODY_DEFAULTS.tumorNoiseAmplitude
+      : SOFT_BODY_DEFAULTS.normalNoiseAmplitude;
+    this.shape = Cell.generateShape(cx, cy, this.radius, seed, this.numShapePoints, noiseAmp);
+
+    // Nucleus geometry — deterministic offset from seed, slightly different proportions for tumor
+    this.computeNucleusGeometry();
 
     // Auto-allocate receptors based on concentrations
     this.allocateReceptors();
@@ -51,16 +58,31 @@ class Cell {
     this.initSoftBody();
   }
 
-  // Generate cell shape — organic Perlin variation when organic=true, perfect circle otherwise
-  static generateShape(cx, cy, baseRadius, seed, numPoints = 32, organic = true) {
+  // Compute nucleus offset and radii from current radius and seed.  Called from the
+  // constructor and from updateConcentrations() whenever the cell radius changes.
+  computeNucleusGeometry() {
+    const angle = (this.seed * 6.283) % (2 * Math.PI);
+    const offset = this.radius * 0.12;
+    this.nucleusOffsetX = Math.cos(angle) * offset;
+    this.nucleusOffsetY = Math.sin(angle) * offset;
+    this.nucleusRadiusX = this.radius * (this.isTumor ? 0.42 : 0.35);
+    this.nucleusRadiusY = this.radius * (this.isTumor ? 0.36 : 0.32);
+  }
+
+  // Generate cell shape — Perlin variation with configurable noise amplitude.
+  // Backward-compatible with boolean callers: true → 0.20, false → 0.
+  static generateShape(cx, cy, baseRadius, seed, numPoints = 32, noiseAmplitude = 0.2) {
     const points = [];
+    const amp = typeof noiseAmplitude === 'boolean'
+      ? (noiseAmplitude ? 0.2 : 0)
+      : noiseAmplitude;
 
     for (let i = 0; i < numPoints; i++) {
       const angle = (i / numPoints) * TWO_PI;
       let r = baseRadius;
-      if (organic) {
+      if (amp > 0) {
         const noiseVal = noise(Math.cos(angle) * 2 + seed, Math.sin(angle) * 2 + seed);
-        r *= map(noiseVal, 0, 1, 0.8, 1.2);
+        r *= map(noiseVal, 0, 1, 1 - amp, 1 + amp);
       }
       points.push({
         x: cx + Math.cos(angle) * r,
@@ -186,9 +208,8 @@ class Cell {
     this.restArea = areaSum * 0.5;
 
     // Bending springs — rest angle taken from the actual initial geometry, so there is
-    // zero initial bending force regardless of cell type.  Non-tumor cells are born as
-    // circles, so their rest angles are naturally the regular-polygon values.
-    // Tumor cells are born with the Perlin shape, so they restore toward that silhouette.
+    // zero initial bending force regardless of noise amplitude.  Tumor cells restore
+    // toward a strongly lumpy silhouette; non-tumor cells toward a gently irregular one.
     const N = this.nodes.length;
     this.bendingSprings = [];
     for (let i = 0; i < N; i++) {
@@ -225,6 +246,13 @@ class Cell {
 
     const sb = SOFT_BODY_DEFAULTS;
 
+    // Slow per-cell breath multiplier — drives gentle pulsation of shape-restoring targets
+    // and (for tumor cells) volume preservation.  Phase is offset by seed so cells don't
+    // pulse in unison; period is ~5s at 60fps.
+    const breathPhase = (2 * Math.PI * frameCount / sb.breathPeriodFrames)
+                      + (this.seed % 1) * 2 * Math.PI;
+    const breathMul = 1 + sb.breathAmplitude * Math.sin(breathPhase);
+
     // 1. Apply external forces to nodes (small — just for subtle jiggle)
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
@@ -260,11 +288,12 @@ class Cell {
     // 3. Shape-restoring springs — pull each node toward its rest position relative to the
     // current centroid.  Cartesian (not radial) so each node has a unique angular target;
     // this makes topology-wrong states (figure-8, double-loop) energetically unstable and
-    // ensures the cell always recovers to the correct shape.
+    // ensures the cell always recovers to the correct shape.  Rest offsets are scaled by
+    // breathMul so the whole cell gently expands and contracts.
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
-      const dx = node.x - (this.cx + node.restOffsetX);
-      const dy = node.y - (this.cy + node.restOffsetY);
+      const dx = node.x - (this.cx + node.restOffsetX * breathMul);
+      const dy = node.y - (this.cy + node.restOffsetY * breathMul);
       node.vx -= dx * sb.pressureStiffness;
       node.vy -= dy * sb.pressureStiffness;
       node.vx -= node.vx * sb.pressureDamping;
@@ -310,10 +339,12 @@ class Cell {
     }
 
     // 3.8. Volume preservation — maintain polygon area to prevent C-shape / pancake collapse.
-    // Computes signed area each frame and applies outward pressure along every edge
-    // proportional to the area deficit.  Uses the shoelace formula; outward normal
-    // for a CCW polygon is (-edgeDy, edgeDx).
-    if (Math.abs(this.restArea) > 1e-6) {
+    // Tumor cells need this because their irregular Perlin shape can collapse on bending
+    // springs alone.  Non-tumor cells (which are nearly circular) are sufficiently held
+    // by structural + bending + shape-restoring springs and look over-inflated when this
+    // is also active, so the block is gated to tumor cells only.  The breath multiplier
+    // scales target area as r² (since area scales as r²) for visible breathing.
+    if (this.isTumor && Math.abs(this.restArea) > 1e-6) {
       const Nv = this.nodes.length;
       let area = 0;
       for (let i = 0; i < Nv; i++) {
@@ -321,7 +352,8 @@ class Cell {
         area += this.nodes[i].x * this.nodes[j].y - this.nodes[j].x * this.nodes[i].y;
       }
       area *= 0.5;
-      const pressure = sb.volumeStiffness * (this.restArea - area) / Math.abs(this.restArea);
+      const breathTarget = this.restArea * breathMul * breathMul;
+      const pressure = sb.volumeStiffness * (breathTarget - area) / Math.abs(this.restArea);
       for (let i = 0; i < Nv; i++) {
         const j = (i + 1) % Nv;
         const edgeDx = this.nodes[j].x - this.nodes[i].x;
@@ -591,6 +623,24 @@ class Cell {
         seg.bx += seg.vx;
         seg.by += seg.vy;
       }
+      // Nucleus segments stay in place during the burst delay, then fly apart with
+      // the same turbulence + damping treatment as the membrane.
+      if (this.nucleusSegments && this.deathTimer >= this.nucleusBurstDelay) {
+        for (let seg of this.nucleusSegments) {
+          const mx = (seg.ax + seg.bx) * 0.5;
+          const my = (seg.ay + seg.by) * 0.5;
+          const nx = noise(mx * noiseScale + frameCount * 0.003 * physicsParams.turbulenceX, my * noiseScale);
+          const ny = noise(mx * noiseScale + 100, my * noiseScale + frameCount * 0.003 * physicsParams.turbulenceY);
+          seg.vx += (nx - 0.5) * 2 * noiseStr;
+          seg.vy += (ny - 0.5) * 2 * noiseStr;
+          seg.vx *= 0.97;
+          seg.vy *= 0.97;
+          seg.ax += seg.vx;
+          seg.ay += seg.vy;
+          seg.bx += seg.vx;
+          seg.by += seg.vy;
+        }
+      }
       if (this.deathTimer >= this.deathDuration) {
         this.dead = true;
       }
@@ -617,11 +667,15 @@ class Cell {
     }
   }
 
-  // Trigger cell death: break membrane into flying segments
+  // Trigger cell death: break membrane into flying segments, and pre-compute the
+  // nucleus burst segments — they hold their starting positions until nucleusBurstDelay
+  // frames have elapsed, then fly apart with the same radial+scatter physics.
   triggerDeath() {
     this.dying = true;
     this.deathTimer = 0;
     this.deathSegments = [];
+    this.nucleusSegments = [];
+    this.nucleusBurstDelay = 25; // ~0.4s at 60fps — membrane gets a head start
     for (let i = 0; i < this.shape.length; i++) {
       const a = this.shape[i];
       const b = this.shape[(i + 1) % this.shape.length];
@@ -642,6 +696,35 @@ class Cell {
         vy: (radDy / radLen) * radialSpeed + Math.sin(scatterAngle) * scatterSpeed
       });
     }
+
+    // Nucleus burst segments — slice the nucleus ellipse into perimeter chords with
+    // outward radial velocity from the nucleus center.  Slightly faster than membrane
+    // for a "denser core releasing" feel.
+    const nucNumPts = 14;
+    const nucCx = this.cx + this.nucleusOffsetX;
+    const nucCy = this.cy + this.nucleusOffsetY;
+    for (let i = 0; i < nucNumPts; i++) {
+      const a1 = (i / nucNumPts) * Math.PI * 2;
+      const a2 = ((i + 1) / nucNumPts) * Math.PI * 2;
+      const ax = nucCx + Math.cos(a1) * this.nucleusRadiusX;
+      const ay = nucCy + Math.sin(a1) * this.nucleusRadiusY;
+      const bx = nucCx + Math.cos(a2) * this.nucleusRadiusX;
+      const by = nucCy + Math.sin(a2) * this.nucleusRadiusY;
+      const mx = (ax + bx) * 0.5;
+      const my = (ay + by) * 0.5;
+      const radDx = mx - nucCx;
+      const radDy = my - nucCy;
+      const radLen = Math.sqrt(radDx * radDx + radDy * radDy) || 1;
+      const radialSpeed = Math.random() * 1.8 + 0.6;
+      const scatterAngle = Math.random() * Math.PI * 2;
+      const scatterSpeed = Math.random() * 0.7;
+      this.nucleusSegments.push({
+        ax: ax, ay: ay,
+        bx: bx, by: by,
+        vx: (radDx / radLen) * radialSpeed + Math.cos(scatterAngle) * scatterSpeed,
+        vy: (radDy / radLen) * radialSpeed + Math.sin(scatterAngle) * scatterSpeed
+      });
+    }
   }
 
   // Returns true once the fade animation has fully completed
@@ -657,9 +740,11 @@ class Cell {
     }
     if (this.dead) return;
 
-    // Draw cell membrane outline with organic shape
-    g.fill(220, 230, 240, 180);
-    g.stroke(100, 100, 120, 120);
+    // Draw cell membrane outline with tissue-specific fill and stroke
+    const f = this.tissueColor.fill;
+    const s = this.tissueColor.stroke;
+    g.fill(f[0], f[1], f[2], f[3]);
+    g.stroke(s[0], s[1], s[2], s[3]);
     g.strokeWeight(2);
     g.beginShape();
     for (let pt of this.shape) {
@@ -667,6 +752,13 @@ class Cell {
     }
     g.endShape(CLOSE);
     g.noStroke();
+
+    // Draw nucleus — slightly off-center filled ellipse that follows the cell centroid
+    const nx = this.cx + this.nucleusOffsetX;
+    const ny = this.cy + this.nucleusOffsetY;
+    if (this.isTumor) g.fill(180, 130, 145, 140);
+    else              g.fill(170, 180, 210, 110);
+    g.ellipse(nx, ny, this.nucleusRadiusX * 2, this.nucleusRadiusY * 2);
 
     // Draw Y-shaped receptors
     for (let receptor of this.receptors) {
@@ -678,12 +770,47 @@ class Cell {
   renderDying(g) {
     const progress = this.deathTimer / this.deathDuration;
     const alpha = Math.round(255 * (1 - progress));
-    g.stroke(100, 100, 120, alpha);
+
+    // Membrane segments use the tissue stroke color so dying cells stay visually consistent
+    const s = this.tissueColor.stroke;
+    g.stroke(s[0], s[1], s[2], alpha);
     g.strokeWeight(2);
     g.noFill();
     for (let seg of this.deathSegments) {
       g.line(seg.ax, seg.ay, seg.bx, seg.by);
     }
+
+    // Nucleus: solid filled ellipse during the burst delay, then flying line segments
+    // that fade over the remainder of the death animation.
+    const burstDelay = this.nucleusBurstDelay || 0;
+    if (this.deathTimer < burstDelay) {
+      // Pre-burst: nucleus stays intact, slight pre-burst dim
+      const nucBaseAlpha = this.isTumor ? 140 : 110;
+      const preBurstFade = 1 - (this.deathTimer / Math.max(1, burstDelay)) * 0.25;
+      const nucAlpha = Math.round(nucBaseAlpha * preBurstFade);
+      g.noStroke();
+      if (this.isTumor) g.fill(180, 130, 145, nucAlpha);
+      else              g.fill(170, 180, 210, nucAlpha);
+      const nx = this.cx + this.nucleusOffsetX;
+      const ny = this.cy + this.nucleusOffsetY;
+      g.ellipse(nx, ny, this.nucleusRadiusX * 2, this.nucleusRadiusY * 2);
+    } else if (this.nucleusSegments) {
+      // Post-burst: line segments fade from full alpha to zero over the remaining frames
+      const burstFramesElapsed = this.deathTimer - burstDelay;
+      const burstFramesTotal = Math.max(1, this.deathDuration - burstDelay);
+      const burstProgress = Math.min(1, burstFramesElapsed / burstFramesTotal);
+      const nucBurstAlpha = Math.round(220 * (1 - burstProgress));
+      if (nucBurstAlpha > 0) {
+        if (this.isTumor) g.stroke(180, 130, 145, nucBurstAlpha);
+        else              g.stroke(170, 180, 210, nucBurstAlpha);
+        g.strokeWeight(1.5);
+        g.noFill();
+        for (let seg of this.nucleusSegments) {
+          g.line(seg.ax, seg.ay, seg.bx, seg.by);
+        }
+      }
+    }
+
     g.noStroke();
   }
 
@@ -779,8 +906,15 @@ class Cell {
     const { minShapePoints } = EXPRESSION_SCALING;
     this.numShapePoints = Math.max(minShapePoints, this.totalReceptorsNeeded);
 
-    // Regenerate shape and receptors
-    this.shape = Cell.generateShape(this.cx, this.cy, this.radius, this.seed, this.numShapePoints, this.isTumor);
+    // Regenerate shape and receptors with the appropriate noise amplitude
+    const noiseAmp = this.isTumor
+      ? SOFT_BODY_DEFAULTS.tumorNoiseAmplitude
+      : SOFT_BODY_DEFAULTS.normalNoiseAmplitude;
+    this.shape = Cell.generateShape(this.cx, this.cy, this.radius, this.seed, this.numShapePoints, noiseAmp);
+
+    // Recompute nucleus geometry for the new radius
+    this.computeNucleusGeometry();
+
     this.allocateReceptors();
 
     // Reinitialize soft body for new shape

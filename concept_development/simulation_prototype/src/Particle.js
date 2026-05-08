@@ -17,6 +17,10 @@ class Particle {
     this.targetCell = null;   // Cell being absorbed into
     this.absorbTimer = 0;     // Frames since absorption started
 
+    // Per-particle ligand arrangement and sprite (assigned by Simulation at spawn)
+    this.ligandPositions = null;
+    this.sprite = null;
+
     // Fade-out state (released when host cell dies)
     this.fading = false;
     this.fadeTimer = 0;
