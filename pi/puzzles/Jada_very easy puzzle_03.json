@@ -1,0 +1,55 @@
+{
+  "id": "Jada_very easy puzzle_03",
+  "toxicity": 2,
+  "constructorNotes": "",
+  "tissues": [
+    {
+      "name": "Tumor",
+      "receptors": [
+        0.3672,
+        0.0443,
+        0.0542,
+        0.7225,
+        0.5886,
+        0.9065
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Heart",
+      "receptors": [
+        0.9778,
+        0.3487,
+        0.3932,
+        0.544,
+        0.8246,
+        0.3803
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Liver",
+      "receptors": [
+        0.8953,
+        0.7439,
+        0.8757,
+        0.4727,
+        0.7062,
+        0.0411
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Lung",
+      "receptors": [
+        0.3889,
+        0.3101,
+        0.942,
+        0.5482,
+        0.7652,
+        0.0498
+      ],
+      "deathThreshold": 5
+    }
+  ]
+}

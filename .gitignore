@@ -1,0 +1,23 @@
+# Generated puzzle card output
+pi/puzzles/graphics/
+pi/example_card.png
+pi/*_card.pdf
+pi/*_card.png
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.swo
+.idea/

@@ -1,0 +1,55 @@
+{
+  "id": "Jada_easy puzzle_01",
+  "toxicity": 2,
+  "constructorNotes": "This one was interesting cause you can also solve with having a mix of red and green. The green will affect the tumor and provide the least amount of damage to the lung but having more red will be more damage to the tumor and the lung (but biding affinity is not so significantly more than when its all green). So all green or about 4-5 red and the other two is green or no ligands in those slots.",
+  "tissues": [
+    {
+      "name": "Tumor",
+      "receptors": [
+        0.6334,
+        0.54,
+        0.5966,
+        0.1122,
+        0.7067,
+        0.1412
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Heart",
+      "receptors": [
+        0.4031,
+        0.9203,
+        0.2502,
+        0.7973,
+        0.333,
+        0.5526
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Liver",
+      "receptors": [
+        0.2049,
+        0.6171,
+        0.1707,
+        0.6167,
+        0.316,
+        0.0515
+      ],
+      "deathThreshold": 5
+    },
+    {
+      "name": "Lung",
+      "receptors": [
+        0.449,
+        0.0129,
+        0.3075,
+        0.2742,
+        0.8328,
+        0.5462
+      ],
+      "deathThreshold": 5
+    }
+  ]
+}
