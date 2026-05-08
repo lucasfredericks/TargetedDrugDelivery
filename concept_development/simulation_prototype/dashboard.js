@@ -390,16 +390,14 @@
     sendParams('reset');
   };
 
-  // Test button: send current params with restart command, then start test
+  // Test button: push current params, then start test (startTest regenerates cells itself)
   testBtn.onclick = ()=> {
     if (!channel) {
       console.error('Dashboard: Cannot send test - BroadcastChannel not available!');
       return;
     }
     console.log('Dashboard: Test button clicked');
-    // Send current parameters to simulation with restart command
-    sendParams('restart');
-    // Then send test command with particle count
+    sendParams();
     setTimeout(() => {
       console.log('Dashboard: Sending test message for', particleCount, 'particles per tissue');
       channel.postMessage({
