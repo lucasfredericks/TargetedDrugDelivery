@@ -43,6 +43,10 @@ DEFAULT_TOXICITY = 2
 # Stats update interval from clients (ms)
 STATS_INTERVAL_MS = 800
 
+# Maximum time (seconds) a test may run before the watchdog auto-resets.
+# Covers: stalled sim clients, all clients disconnecting mid-test, runaway tests.
+TEST_TIMEOUT_SECONDS = 120
+
 # Arduino serial connection (PN532 RFID + start button)
 SERIAL_PORT = "/dev/ttyACM0"   # Arduino Uno native USB
 SERIAL_BAUD = 115200

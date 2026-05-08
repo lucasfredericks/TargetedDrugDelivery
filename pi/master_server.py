@@ -17,6 +17,7 @@ import os
 import queue
 import sys
 import threading
+import time
 
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
@@ -45,6 +46,10 @@ sensor_service = None     # Pi I2C color sensors
 arduino_rfid = None       # Arduino PN532 RFID + start button
 _sensor_lock = threading.Lock()  # Prevents concurrent I2C reads from multiple threads
 _action_queue = queue.Queue()    # OS threads enqueue; eventlet greenlet dispatches
+
+# Button debounce: ignore repeat presses within this window.
+_BUTTON_DEBOUNCE_SECS = 2.0
+_last_test_action_time = 0.0
 
 
 # --- HTTP Routes ---
@@ -166,10 +171,13 @@ def handle_connect():
 @socketio.on("disconnect")
 def handle_disconnect():
     sid = _sid()
+    was_expected = sid in client_manager._expected_completers
     client_manager.unregister(sid)
     logger.info("Client disconnected: %s", sid)
-    # Notify display of client count change
     _emit_to_display("client_count", {"count": client_manager.count})
+    # If an expected completer dropped, check whether the test can finish or must reset.
+    if state_machine.state == State.TESTING and was_expected:
+        _check_test_done()
 
 
 @socketio.on("register_client")
@@ -181,6 +189,17 @@ def handle_register(data):
     client_manager.register(sid, data)
     assignment = client_manager.get_assignment(sid)
     emit("assignment", {"tissueIndices": assignment})
+
+    # Push current puzzle/ligand state so the client displays the right config
+    # immediately rather than waiting for the next sensor poll cycle.
+    # Works for both idle and mid-test arrivals: mid-test clients have no
+    # tissue assignment so they show idle cells with the correct receptors.
+    if state_machine.ligand_positions is not None or state_machine.current_puzzle is not None:
+        emit("ligand_update", {
+            "ligandPositions": state_machine.ligand_positions,
+            "puzzle": state_machine.current_puzzle,
+        })
+
     _emit_to_display("client_count", {"count": client_manager.count})
     logger.info("Client %s assigned tissues: %s", sid, assignment)
 
@@ -200,16 +219,13 @@ def handle_stats_update(data):
 @socketio.on("test_complete")
 def handle_test_complete(data):
     """A simulation client has finished its test."""
+    if state_machine.state != State.TESTING:
+        return  # Stale completion after a reset or timeout — ignore.
     sid = _sid()
     final_stats = data.get("finalStats", [])
     client_manager.update_stats(sid, final_stats)
     client_manager.mark_complete(sid)
-
-    if client_manager.all_complete():
-        all_results = client_manager.get_aggregated_stats()
-        state_machine.complete_test(all_results)
-        _emit_to_display("test_complete", {"finalResults": all_results})
-        logger.info("All clients complete. Final results collected.")
+    _check_test_done()
 
 
 # --- Socket.IO: Display Events ---
@@ -313,17 +329,18 @@ def action_scan_rfid(uid=None):
 
 def action_start_test():
     """Send test command to all connected simulation clients."""
+    # Validate preconditions BEFORE transitioning state.
+    if client_manager.count == 0:
+        logger.warning("No simulation clients connected")
+        _emit_to_display("error", {"message": "No simulation clients connected"})
+        return
+
     if not state_machine.start_test():
         logger.warning("Cannot start test in state: %s", state_machine.state.name)
         return
 
-    if client_manager.count == 0:
-        logger.warning("No simulation clients connected")
-        state_machine.reset()
-        _emit_to_display("error", {"message": "No simulation clients connected"})
-        return
-
     client_manager.reset_all()
+    client_manager.lock()  # Freeze assignments; snapshot expected completers.
 
     # Broadcast test config to all sim clients via their room.
     # Room-based emit is reliable from any thread; SID-targeted emit
@@ -342,15 +359,67 @@ def action_start_test():
         "ligandPositions": state_machine.ligand_positions,
         "puzzle": puzzle
     })
-    logger.info("Test started with %d clients", client_manager.count)
+    logger.info(
+        "Test started with %d client(s) (%d expected completer(s))",
+        client_manager.count, client_manager.expected_completer_count,
+    )
+
+
+def action_restart_test():
+    """Start or restart the test, handling mid-test button presses.
+
+    Valid from TESTING, PUZZLE_LOADED, or RESULTS states.
+
+    - TESTING: emits reset to sim clients, steps state back to PUZZLE_LOADED
+      (preserving current puzzle + nanoparticle config), then starts a new test.
+    - PUZZLE_LOADED: starts normally.
+    - RESULTS: transitions back to PUZZLE_LOADED, then starts a new test.
+    - Other states: logs a warning; no action taken.
+
+    A 2-second debounce prevents an accidental double-press from launching
+    two sequential tests.
+    """
+    global _last_test_action_time
+    now = time.monotonic()
+    if now - _last_test_action_time < _BUTTON_DEBOUNCE_SECS:
+        logger.debug(
+            "Button debounced (%.2fs < %.1fs threshold)",
+            now - _last_test_action_time, _BUTTON_DEBOUNCE_SECS,
+        )
+        return
+    _last_test_action_time = now
+
+    if state_machine.state == State.TESTING:
+        logger.info("Button pressed mid-test; restarting with current parameters")
+        # Release clients from test mode so they accept the new start_test.
+        client_manager.reset_all()
+        client_manager.unlock()
+        socketio.emit("reset", {}, room="sim_clients")
+        # Step state back to PUZZLE_LOADED, preserving puzzle + ligand config.
+        state_machine.restart_test()
+        action_start_test()
+
+    elif state_machine.state == State.PUZZLE_LOADED:
+        action_start_test()
+
+    elif state_machine.state == State.RESULTS:
+        # Repeat run with the same puzzle/nanoparticle without re-scanning.
+        if state_machine.transition(State.PUZZLE_LOADED):
+            action_start_test()
+
+    else:
+        logger.warning(
+            "Button pressed in state %s — no puzzle/nanoparticle configured yet; ignoring",
+            state_machine.state.name,
+        )
 
 
 def action_reset():
     """Reset exhibit to idle state."""
     state_machine.reset()
     client_manager.reset_all()
+    client_manager.unlock()  # Re-enable tissue reassignment for the next test.
 
-    # Tell sim clients to reset
     socketio.emit("reset", {}, room="sim_clients")
     _emit_to_display("state_reset", {})
     logger.info("Exhibit reset to IDLE")
@@ -370,7 +439,7 @@ def handle_action_rfid(_data=None):
 
 @socketio.on("action_test")
 def handle_action_test(_data=None):
-    action_start_test()
+    action_restart_test()
 
 
 @socketio.on("action_reset")
@@ -390,6 +459,27 @@ def _emit_to_display(event, data):
     socketio.emit(event, data, room="display")
 
 
+def _check_test_done():
+    """Evaluate test completion after any client status change.
+
+    Called when a client sends test_complete or disconnects mid-test.
+    - If all expected completers are done → complete the test normally.
+    - If no expected completers remain (all disconnected) → auto-reset so
+      the exhibit doesn't hang indefinitely.
+    """
+    if state_machine.state != State.TESTING:
+        return
+    if client_manager.all_complete():
+        all_results = client_manager.get_aggregated_stats()
+        state_machine.complete_test(all_results)
+        _emit_to_display("test_complete", {"finalResults": all_results})
+        logger.info("Test complete. Final results collected.")
+    elif client_manager.no_completers_left():
+        logger.warning("All expected completers disconnected; auto-resetting exhibit")
+        _emit_to_display("error", {"message": "All simulation clients lost; exhibit reset"})
+        action_reset()
+
+
 # --- Background Tasks ---
 
 def _action_dispatch_loop():
@@ -405,10 +495,41 @@ def _action_dispatch_loop():
             try:
                 action = _action_queue.get_nowait()
                 action()
+                socketio.sleep(0)  # Yield between actions so other greenlets stay responsive.
             except queue.Empty:
                 break
             except Exception as e:
                 logger.error("Action dispatch error: %s", e)
+
+
+def _test_watchdog_loop():
+    """Eventlet greenlet: auto-reset if a test exceeds TEST_TIMEOUT_SECONDS.
+
+    Covers scenarios where sim clients stall, all clients disconnect mid-test,
+    or a network failure prevents test_complete from reaching the server.
+    Checks every 5 seconds; tracks elapsed time only while in TESTING state.
+    """
+    from config import TEST_TIMEOUT_SECONDS
+    test_started_at = None
+
+    while True:
+        socketio.sleep(5)
+        if state_machine.state == State.TESTING:
+            if test_started_at is None:
+                test_started_at = time.monotonic()
+            elapsed = time.monotonic() - test_started_at
+            if elapsed > TEST_TIMEOUT_SECONDS:
+                logger.warning(
+                    "Test watchdog: %.0fs elapsed (limit %ds); auto-resetting",
+                    elapsed, TEST_TIMEOUT_SECONDS,
+                )
+                _emit_to_display("error", {
+                    "message": f"Test timed out after {int(elapsed)}s; exhibit reset"
+                })
+                action_reset()
+                test_started_at = None
+        else:
+            test_started_at = None
 
 
 def _do_sensor_read(svc):
@@ -483,6 +604,9 @@ def main():
     # callbacks into the eventlet loop where socketio.emit works reliably.
     socketio.start_background_task(_action_dispatch_loop)
 
+    # Watchdog: auto-reset if a test runs longer than TEST_TIMEOUT_SECONDS.
+    socketio.start_background_task(_test_watchdog_loop)
+
     if args.no_hardware:
         logger.info("Running without hardware (display/network only)")
 
@@ -530,9 +654,9 @@ def main():
                         lambda: socketio.emit("admin_tag_removed", {}, room="admin")
                     )
                 )
-                # Start button → start test
+                # Start button → start or restart test
                 arduino_rfid.on_start(
-                    lambda: _action_queue.put(action_start_test)
+                    lambda: _action_queue.put(action_restart_test)
                 )
                 logger.info("Arduino RFID/button ready")
 

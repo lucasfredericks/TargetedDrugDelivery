@@ -196,6 +196,13 @@ function setupNetwork() {
 
   // Handle test start (from Pi master or dashboard)
   network.onStartTest((data) => {
+    // Defensive guard: ignore if already running a test (duplicate event or
+    // stale message after a reconnect).  Pi-side state machine prevents this
+    // in normal operation, but the sim PC should be resilient regardless.
+    if (simulations.some(sim => sim.getTestStatus().testMode)) {
+      console.warn('start_test received while already in test mode; ignoring');
+      return;
+    }
     console.log('Starting test mode, ligandPositions:', data?.ligandPositions,
                 'puzzle:', data?.puzzle?.id || data?.puzzle?.name);
 
@@ -219,8 +226,10 @@ function setupNetwork() {
       }
     }
 
+    const totalParticles = (data?.totalParticles != null && data.totalParticles > 0)
+      ? data.totalParticles : 1000;
     for (let sim of simulations) {
-      sim.startTest(data?.totalParticles || 1000, 600);
+      sim.startTest(totalParticles, 600);
     }
     updateScoreboard();
     sendStats();
@@ -332,6 +341,11 @@ function sendStats() {
   });
   if (allDone && simulations.some(sim => sim.getTestStatus().released > 0)) {
     network.sendTestComplete(stats);
+    // Exit testMode so ligand_update messages can update receptor concentrations
+    // for the next puzzle preview while the Pi is in RESULTS state.
+    for (let sim of simulations) {
+      sim.stopTest();
+    }
   }
 }
 

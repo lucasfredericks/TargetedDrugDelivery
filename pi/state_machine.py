@@ -23,8 +23,8 @@ TRANSITIONS = {
     State.IDLE: {State.NANOPARTICLE_SCANNED},
     State.NANOPARTICLE_SCANNED: {State.PUZZLE_LOADED, State.NANOPARTICLE_SCANNED},
     State.PUZZLE_LOADED: {State.TESTING, State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED},
-    State.TESTING: {State.RESULTS, State.TESTING},
-    State.RESULTS: {State.IDLE, State.TESTING},
+    State.TESTING: {State.RESULTS, State.PUZZLE_LOADED},
+    State.RESULTS: {State.IDLE, State.TESTING, State.PUZZLE_LOADED},
 }
 
 
@@ -72,19 +72,27 @@ class ExhibitStateMachine:
         return True
 
     def load_puzzle(self, puzzle):
-        """Record a puzzle load. Valid after nanoparticle scan."""
-        if self.state in (State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED):
+        """Record a puzzle load. Valid after nanoparticle scan or after results."""
+        if self.state in (State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED, State.RESULTS):
             self.current_puzzle = puzzle
             self.transition(State.PUZZLE_LOADED)
             return True
         return False
 
     def start_test(self):
-        """Begin testing. Valid from PUZZLE_LOADED or TESTING (restart)."""
-        if self.state in (State.PUZZLE_LOADED, State.TESTING, State.RESULTS):
+        """Begin testing. Valid only from PUZZLE_LOADED."""
+        if self.state == State.PUZZLE_LOADED:
             self.test_results = None
             return self.transition(State.TESTING)
         return False
+
+    def restart_test(self):
+        """Transition TESTING → PUZZLE_LOADED so a fresh test can be started.
+
+        Preserves current_puzzle and ligand_positions so the restart uses the
+        same nanoparticle and tissue configuration without re-scanning.
+        """
+        return self.transition(State.PUZZLE_LOADED)
 
     def complete_test(self, results):
         """Record test completion with final results."""
