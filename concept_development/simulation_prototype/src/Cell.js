@@ -1,10 +1,12 @@
 // Cell.js - Cell entity with organic shape generation and receptor management
 
 class Cell {
-  constructor(cx, cy, baseRadius, seed, receptorConcentrations) {
+  constructor(cx, cy, baseRadius, seed, receptorConcentrations, isTumor = false) {
     this.cx = cx;
     this.cy = cy;
     this.seed = seed;
+    this.isTumor = isTumor;
+    this.bendingSprings = [];
     this.receptors = [];    // Array of Receptor objects
     this.receptorNodes = []; // Array of {angle, x, y, pairId} - nodes between adjacent receptors
     this.bound = 0;         // Count of bound particles on this cell
@@ -39,8 +41,8 @@ class Cell {
     const { minShapePoints } = EXPRESSION_SCALING;
     this.numShapePoints = Math.max(minShapePoints, this.totalReceptorsNeeded);
 
-    // Generate shape with enough points for all receptors
-    this.shape = Cell.generateShape(cx, cy, this.radius, seed, this.numShapePoints);
+    // Generate shape — organic Perlin for tumor cells, clean circle for all others
+    this.shape = Cell.generateShape(cx, cy, this.radius, seed, this.numShapePoints, this.isTumor);
 
     // Auto-allocate receptors based on concentrations
     this.allocateReceptors();
@@ -49,16 +51,17 @@ class Cell {
     this.initSoftBody();
   }
 
-  // Generate organic cell shape using Perlin noise
-  static generateShape(cx, cy, baseRadius, seed, numPoints = 32) {
+  // Generate cell shape — organic Perlin variation when organic=true, perfect circle otherwise
+  static generateShape(cx, cy, baseRadius, seed, numPoints = 32, organic = true) {
     const points = [];
 
     for (let i = 0; i < numPoints; i++) {
       const angle = (i / numPoints) * TWO_PI;
-      // Use Perlin noise to create organic variation in radius
-      const noiseVal = noise(Math.cos(angle) * 2 + seed, Math.sin(angle) * 2 + seed);
-      const radiusVariation = map(noiseVal, 0, 1, 0.8, 1.2);
-      const r = baseRadius * radiusVariation;
+      let r = baseRadius;
+      if (organic) {
+        const noiseVal = noise(Math.cos(angle) * 2 + seed, Math.sin(angle) * 2 + seed);
+        r *= map(noiseVal, 0, 1, 0.8, 1.2);
+      }
       points.push({
         x: cx + Math.cos(angle) * r,
         y: cy + Math.sin(angle) * r
@@ -138,27 +141,65 @@ class Cell {
     const sb = SOFT_BODY_DEFAULTS;
     this.softBodyEnabled = sb.enabled;
 
-    // Store the anchored center — cell never drifts from this position
-    this.anchorX = this.cx;
-    this.anchorY = this.cy;
-
     if (!this.softBodyEnabled || !this.shape || this.shape.length === 0) {
+      this.anchorX = this.cx;
+      this.anchorY = this.cy;
       this.nodes = [];
       this.structuralSprings = [];
       return;
     }
 
     // Create mass nodes from shape points
-    // Rest offsets are relative to cell center so they move with the cell
     this.nodes = this.shape.map(pt => ({
       x: pt.x,
       y: pt.y,
       vx: 0,
       vy: 0,
-      restOffsetX: pt.x - this.cx,
-      restOffsetY: pt.y - this.cy,
+      restOffsetX: 0,
+      restOffsetY: 0,
       mass: 1.0
     }));
+
+    // The organic shape's centroid differs from (cx, cy) because Perlin-noise radii vary.
+    // Recompute cx/cy to the true centroid so that restOffsets and the anchor are consistent
+    // with where the nodes actually are — prevents a jump-to-equilibrium on the first frame.
+    let sumX = 0, sumY = 0;
+    for (let node of this.nodes) { sumX += node.x; sumY += node.y; }
+    this.cx = sumX / this.nodes.length;
+    this.cy = sumY / this.nodes.length;
+
+    for (let node of this.nodes) {
+      node.restOffsetX = node.x - this.cx;
+      node.restOffsetY = node.y - this.cy;
+    }
+
+    // Anchor at the true centroid — zero initial spring force
+    this.anchorX = this.cx;
+    this.anchorY = this.cy;
+
+    // Rest area for volume preservation (signed, positive for CCW winding)
+    let areaSum = 0;
+    for (let i = 0; i < this.nodes.length; i++) {
+      const j = (i + 1) % this.nodes.length;
+      areaSum += this.nodes[i].x * this.nodes[j].y - this.nodes[j].x * this.nodes[i].y;
+    }
+    this.restArea = areaSum * 0.5;
+
+    // Bending springs — rest angle taken from the actual initial geometry, so there is
+    // zero initial bending force regardless of cell type.  Non-tumor cells are born as
+    // circles, so their rest angles are naturally the regular-polygon values.
+    // Tumor cells are born with the Perlin shape, so they restore toward that silhouette.
+    const N = this.nodes.length;
+    this.bendingSprings = [];
+    for (let i = 0; i < N; i++) {
+      const A = this.nodes[(i - 1 + N) % N];
+      const B = this.nodes[i];
+      const C = this.nodes[(i + 1) % N];
+      const e1x = A.x - B.x, e1y = A.y - B.y;
+      const e2x = C.x - B.x, e2y = C.y - B.y;
+      const restAngle = Math.atan2(e1x * e2y - e1y * e2x, e1x * e2x + e1y * e2y);
+      this.bendingSprings.push({ i, restAngle });
+    }
 
     // Structural springs between adjacent nodes (membrane shape preservation)
     this.structuralSprings = [];
@@ -216,20 +257,80 @@ class Cell {
       nj.vy -= (fy + dampFy) / nj.mass;
     }
 
-    // 3. Shape-restoring springs — pull each node toward its rest shape relative to current center
-    // Because rest offsets are relative, the whole cell can translate freely;
-    // only local deformation is resisted by these springs.
+    // 3. Shape-restoring springs — pull each node toward its rest position relative to the
+    // current centroid.  Cartesian (not radial) so each node has a unique angular target;
+    // this makes topology-wrong states (figure-8, double-loop) energetically unstable and
+    // ensures the cell always recovers to the correct shape.
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
-      const targetX = this.cx + node.restOffsetX;
-      const targetY = this.cy + node.restOffsetY;
-      const dx = node.x - targetX;
-      const dy = node.y - targetY;
-
+      const dx = node.x - (this.cx + node.restOffsetX);
+      const dy = node.y - (this.cy + node.restOffsetY);
       node.vx -= dx * sb.pressureStiffness;
       node.vy -= dy * sb.pressureStiffness;
       node.vx -= node.vx * sb.pressureDamping;
       node.vy -= node.vy * sb.pressureDamping;
+    }
+
+    // 3.5. Bending springs — resist angle changes at each membrane joint.
+    // Force derived from the analytical gradient of the joint angle w.r.t. node positions.
+    // Tumor cells restore to their Perlin shape; all others restore to a circle.
+    const bendK = sb.bendingStiffness;
+    if (bendK > 0) {
+      const N = this.nodes.length;
+      for (const spring of this.bendingSprings) {
+        const idx = spring.i;
+        const A = this.nodes[(idx - 1 + N) % N];
+        const B = this.nodes[idx];
+        const C = this.nodes[(idx + 1) % N];
+
+        const e1x = A.x - B.x, e1y = A.y - B.y;
+        const e2x = C.x - B.x, e2y = C.y - B.y;
+        const denom = (e1x*e1x + e1y*e1y) * (e2x*e2x + e2y*e2y);
+        if (denom < 1e-6) continue;
+
+        const cross = e1x*e2y - e1y*e2x;
+        const dot_  = e1x*e2x + e1y*e2y;
+        let dAngle = Math.atan2(cross, dot_) - spring.restAngle;
+        if (dAngle >  Math.PI) dAngle -= 2 * Math.PI;
+        if (dAngle < -Math.PI) dAngle += 2 * Math.PI;
+
+        const scale = -bendK * dAngle / denom;
+
+        // Gradient numerators: ∂(angle)/∂pos × denom
+        const gAx =  dot_ * e2y - cross * e2x;
+        const gAy = -dot_ * e2x - cross * e2y;
+        const gCx = -dot_ * e1y - cross * e1x;
+        const gCy =  dot_ * e1x - cross * e1y;
+
+        A.vx += scale * gAx;  A.vy += scale * gAy;
+        C.vx += scale * gCx;  C.vy += scale * gCy;
+        B.vx -= scale * (gAx + gCx);
+        B.vy -= scale * (gAy + gCy);
+      }
+    }
+
+    // 3.8. Volume preservation — maintain polygon area to prevent C-shape / pancake collapse.
+    // Computes signed area each frame and applies outward pressure along every edge
+    // proportional to the area deficit.  Uses the shoelace formula; outward normal
+    // for a CCW polygon is (-edgeDy, edgeDx).
+    if (Math.abs(this.restArea) > 1e-6) {
+      const Nv = this.nodes.length;
+      let area = 0;
+      for (let i = 0; i < Nv; i++) {
+        const j = (i + 1) % Nv;
+        area += this.nodes[i].x * this.nodes[j].y - this.nodes[j].x * this.nodes[i].y;
+      }
+      area *= 0.5;
+      const pressure = sb.volumeStiffness * (this.restArea - area) / Math.abs(this.restArea);
+      for (let i = 0; i < Nv; i++) {
+        const j = (i + 1) % Nv;
+        const edgeDx = this.nodes[j].x - this.nodes[i].x;
+        const edgeDy = this.nodes[j].y - this.nodes[i].y;
+        const fnx = -edgeDy * 0.5 * pressure;
+        const fny =  edgeDx * 0.5 * pressure;
+        this.nodes[i].vx += fnx;  this.nodes[i].vy += fny;
+        this.nodes[j].vx += fnx;  this.nodes[j].vy += fny;
+      }
     }
 
     // 4. Integrate positions and apply damping
@@ -254,15 +355,99 @@ class Cell {
     this.cx = sumX / this.nodes.length;
     this.cy = sumY / this.nodes.length;
 
-    // 6. Anchor spring — pull cell center back toward spawn point (prevents drift)
-    // This is a force on the whole cell, distributed to all nodes
+    // 5.5. Hard constraints — position corrections applied after integration.
+    //
+    // (a) Edge length cap: if an edge exceeds maxEdgeStretch × restLength, shorten it
+    //     back directly and zero the separating velocity so it doesn't re-stretch next frame.
+    //
+    // (b) Winding guard: for CCW winding, cross(A−B, C−B) must be < 0 at every node.
+    //     A positive value means the node has folded to the wrong side of its neighbours.
+    //     Snap it halfway back to its Cartesian rest position and kill its velocity so the
+    //     fold doesn't propagate.
+    {
+      const Nc = this.nodes.length;
+
+      // (a) Edge length cap
+      for (const spring of this.structuralSprings) {
+        const ni = this.nodes[spring.i];
+        const nj = this.nodes[spring.j];
+        const dx = nj.x - ni.x, dy = nj.y - ni.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const maxLen = spring.restLength * sb.maxEdgeStretch;
+        if (dist > maxLen) {
+          const corr = (dist - maxLen) / dist * 0.5;
+          ni.x += dx * corr;  ni.y += dy * corr;
+          nj.x -= dx * corr;  nj.y -= dy * corr;
+          this.shape[spring.i].x = ni.x;  this.shape[spring.i].y = ni.y;
+          this.shape[spring.j].x = nj.x;  this.shape[spring.j].y = nj.y;
+          // Remove separating velocity component to prevent immediate re-stretch
+          const nx = dx / dist, ny = dy / dist;
+          const relVel = (nj.vx - ni.vx) * nx + (nj.vy - ni.vy) * ny;
+          if (relVel > 0) {
+            ni.vx += 0.5 * relVel * nx;  ni.vy += 0.5 * relVel * ny;
+            nj.vx -= 0.5 * relVel * nx;  nj.vy -= 0.5 * relVel * ny;
+          }
+        }
+      }
+
+      // (b) Winding guard
+      for (let i = 0; i < Nc; i++) {
+        const A = this.nodes[(i - 1 + Nc) % Nc];
+        const B = this.nodes[i];
+        const C = this.nodes[(i + 1) % Nc];
+        const cross = (A.x - B.x) * (C.y - B.y) - (A.y - B.y) * (C.x - B.x);
+        if (cross > 0) {
+          const tx = this.cx + B.restOffsetX;
+          const ty = this.cy + B.restOffsetY;
+          B.x += (tx - B.x) * 0.5;
+          B.y += (ty - B.y) * 0.5;
+          B.vx *= 0.1;
+          B.vy *= 0.1;
+          this.shape[i].x = B.x;
+          this.shape[i].y = B.y;
+        }
+      }
+    }
+
+    // 6. Angular velocity damping — bleed off rigid-body spin so tangential impacts
+    // don't send the cell into a continuous rotation.
+    // ω = Σ(r × v) / Σ|r|²  (2D scalar angular velocity)
+    {
+      let angNum = 0, angDen = 0;
+      for (const node of this.nodes) {
+        const rx = node.x - this.cx;
+        const ry = node.y - this.cy;
+        angNum += rx * node.vy - ry * node.vx;
+        angDen += rx * rx + ry * ry;
+      }
+      if (angDen > 0) {
+        const omega = angNum / angDen;
+        const drain = omega * sb.angularDamping;
+        for (const node of this.nodes) {
+          const rx = node.x - this.cx;
+          const ry = node.y - this.cy;
+          node.vx += drain * ry;
+          node.vy -= drain * rx;
+        }
+      }
+    }
+
+    // 7. Anchor spring — pull cell center back toward spawn point (prevents drift)
+    // Dead zone: no force within anchorSlack radius; spring engages only on excess displacement
     const anchorDx = this.cx - this.anchorX;
     const anchorDy = this.cy - this.anchorY;
-    const pullX = anchorDx * sb.anchorStiffness;
-    const pullY = anchorDy * sb.anchorStiffness;
-    for (let node of this.nodes) {
-      node.vx -= pullX;
-      node.vy -= pullY;
+    const anchorDist = Math.sqrt(anchorDx * anchorDx + anchorDy * anchorDy);
+    const slack = sb.anchorSlack ?? 0;
+    if (anchorDist > slack) {
+      const excess = anchorDist - slack;
+      const nx = anchorDx / anchorDist;
+      const ny = anchorDy / anchorDist;
+      const pullX = nx * excess * sb.anchorStiffness;
+      const pullY = ny * excess * sb.anchorStiffness;
+      for (let node of this.nodes) {
+        node.vx -= pullX;
+        node.vy -= pullY;
+      }
     }
 
     // 7. Update receptor positions to follow their anchored shape points
@@ -595,7 +780,7 @@ class Cell {
     this.numShapePoints = Math.max(minShapePoints, this.totalReceptorsNeeded);
 
     // Regenerate shape and receptors
-    this.shape = Cell.generateShape(this.cx, this.cy, this.radius, this.seed, this.numShapePoints);
+    this.shape = Cell.generateShape(this.cx, this.cy, this.radius, this.seed, this.numShapePoints, this.isTumor);
     this.allocateReceptors();
 
     // Reinitialize soft body for new shape

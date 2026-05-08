@@ -50,15 +50,20 @@ const LAYOUT_DEFAULTS = {
 
 // Soft body spring-mass defaults for cell membranes
 const SOFT_BODY_DEFAULTS = {
-  structuralStiffness: 0.5,   // Spring constant between adjacent membrane nodes
-  structuralDamping: 0.1,    // Damping on structural springs
-  pressureStiffness: 0.25,    // Spring constant from nodes to cell center (volume preservation)
+  structuralStiffness: 0.8,   // Spring constant between adjacent membrane nodes
+  structuralDamping: 0.1,     // Damping on structural springs
+  pressureStiffness: 0.08,    // Cartesian spring pulling each node toward its rest offset from centroid
   pressureDamping: 0.03,      // Damping on pressure springs
-  nodeDamping: 0.93,          // Per-frame velocity damping on nodes
+  nodeDamping: 0.96,          // Per-frame velocity damping on nodes
   fluidForceScale: 0.02,      // How strongly fluid velocity pushes membrane nodes
-  brownianStrength: 0.05,     // Random jitter force on nodes (biological micro-motion)
-  impactForceScale: 1.0,      // Force multiplier when a nanoparticle hits the membrane
+  brownianStrength: 0.02,     // Random jitter force on nodes (biological micro-motion)
+  impactForceScale: .5,      // Force multiplier when a nanoparticle hits the membrane
   anchorStiffness: 0.1,       // How strongly the cell center is tethered to its spawn point (0-1)
+  anchorSlack: 20,            // Dead-zone radius (px): cell drifts freely before spring engages
+  bendingStiffness: 8,        // Resistance to angle changes at each membrane joint
+  angularDamping: 0.8,        // Fraction of rigid-body angular velocity removed per frame (0=none, 1=full)
+  volumeStiffness: 0.06,      // Pressure force proportional to area deficit (prevents C-shape collapse)
+  maxEdgeStretch: 0.95,        // Hard upper limit on edge length as a multiple of rest length
   enabled: true
 };
 

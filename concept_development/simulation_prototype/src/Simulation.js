@@ -186,7 +186,8 @@ class Simulation {
         const seed = Math.random() * 1000;
 
         // Create cell with receptor concentrations (constructor calculates actual radius)
-        const cell = new Cell(cx, cy, baseRadius, seed, this.tissue.receptors);
+        const isTumor = this.tissue.name.toLowerCase().includes('tumor');
+        const cell = new Cell(cx, cy, baseRadius, seed, this.tissue.receptors, isTumor);
         // Store base radius on cell for later updates
         cell.baseRadius = baseRadius;
 
