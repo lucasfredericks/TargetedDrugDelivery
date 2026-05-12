@@ -57,7 +57,7 @@ const SOFT_BODY_DEFAULTS = {
   nodeDamping: 0.96,          // Per-frame velocity damping on nodes
   fluidForceScale: 0.02,      // How strongly fluid velocity pushes membrane nodes
   brownianStrength: 0.02,     // Random jitter force on nodes (biological micro-motion)
-  impactForceScale: .5,      // Force multiplier when a nanoparticle hits the membrane
+  impactForceScale: .8,      // Force multiplier when a nanoparticle hits the membrane
   anchorStiffness: 0.1,       // How strongly the cell center is tethered to its spawn point (0-1)
   anchorSlack: 20,            // Dead-zone radius (px): cell drifts freely before spring engages
   bendingStiffness: 8,        // Resistance to angle changes at each membrane joint
@@ -80,7 +80,15 @@ const RECEPTOR_DEFAULTS = {
   armLenScale: 1.0,      // Length of each arm rising from the bottom
   armAngleDeg: 15,       // Outward splay of arms from the stem axis (0 = parallel arms)
   latchedScale: 1.2,     // Whole-shape size multiplier when bound/refractory
-  refractoryDurationFrames: 150  // Frames the receptor stays in refractory after absorption (~5s @ 60fps)
+  refractoryDurationFrames: 150,  // Frames the receptor stays in refractory after absorption (~5s @ 60fps)
+
+  // Sway dynamics — tips behave as damped springs around their rest position.
+  // Disengaged when bound/latched/refractory so the latched triangle stays put.
+  swayEnabled: true,
+  swayStiffness: 0.08,    // Restoring force per unit tip displacement (per-frame units)
+  swayDamping: 0.92,      // Per-frame velocity damping (1 = none, 0 = freeze)
+  swayBrownian: 0.05,     // Random impulse magnitude added to tip velocity each frame
+  swayMaxOffset: 3        // Hard clamp on tip displacement from rest (px) — prevents stretch artifacts
 };
 
 // Per-tissue color palette: fill (membrane interior) and stroke (outline / death segments)

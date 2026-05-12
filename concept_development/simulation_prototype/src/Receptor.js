@@ -6,8 +6,10 @@ class Receptor {
     this.baseY = baseY;
     this.tipX = tipX;        // Position of receptor tip (where binding occurs)
     this.tipY = tipY;
+    this.tipVx = 0;          // Tip velocity (for spring sway)
+    this.tipVy = 0;
     this.color = color;      // Color index (0-5)
-    this.nx = nx;            // Outward normal x component
+    this.nx = nx;            // Outward normal x component (from base to tip)
     this.ny = ny;            // Outward normal y component
     this.branchLen = branchLen;
     this.bound = false;      // Whether a particle is bound to this receptor

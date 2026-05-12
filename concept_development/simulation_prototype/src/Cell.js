@@ -486,8 +486,13 @@ class Cell {
     this.updateReceptorPositions();
   }
 
-  // Reposition receptors to follow deformed membrane
+  // Reposition receptors to follow deformed membrane.  Free receptors sway as damped
+  // springs around their rest tip position; bound/latched/refractory ones snap rigidly
+  // so the latched triangle visual stays anchored to the ligand.
   updateReceptorPositions() {
+    const r = window.RECEPTOR_DEFAULTS;
+    const swayOn = r.swayEnabled !== false;
+
     for (let receptor of this.receptors) {
       if (receptor.shapeIndex === undefined) continue;
 
@@ -495,19 +500,54 @@ class Cell {
       const dx = pt.x - this.cx;
       const dy = pt.y - this.cy;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const nx = dx / dist;
-      const ny = dy / dist;
+      const restNx = dx / dist;
+      const restNy = dy / dist;
 
-      // Update receptor base (on membrane) and tip (outward)
       receptor.baseX = pt.x;
       receptor.baseY = pt.y;
-      receptor.nx = nx;
-      receptor.ny = ny;
 
-      const branchLen = receptor.branchLen;
-      const stemLen = branchLen * 2;
-      receptor.tipX = pt.x + nx * stemLen;
-      receptor.tipY = pt.y + ny * stemLen;
+      const stemLen = receptor.branchLen * 2;
+      const restTipX = pt.x + restNx * stemLen;
+      const restTipY = pt.y + restNy * stemLen;
+
+      const lockSway = !swayOn || receptor.bound || receptor.latched || receptor.refractory;
+
+      if (lockSway) {
+        receptor.tipX = restTipX;
+        receptor.tipY = restTipY;
+        receptor.tipVx = 0;
+        receptor.tipVy = 0;
+        receptor.nx = restNx;
+        receptor.ny = restNy;
+        continue;
+      }
+
+      // Spring: restoring force toward rest tip + Brownian jitter + velocity damping
+      let sx = receptor.tipX - restTipX;
+      let sy = receptor.tipY - restTipY;
+      receptor.tipVx += -sx * r.swayStiffness + (Math.random() - 0.5) * r.swayBrownian;
+      receptor.tipVy += -sy * r.swayStiffness + (Math.random() - 0.5) * r.swayBrownian;
+      receptor.tipVx *= r.swayDamping;
+      receptor.tipVy *= r.swayDamping;
+      receptor.tipX += receptor.tipVx;
+      receptor.tipY += receptor.tipVy;
+
+      // Clamp displacement so the stem can't visibly stretch under noise spikes
+      sx = receptor.tipX - restTipX;
+      sy = receptor.tipY - restTipY;
+      const offset = Math.sqrt(sx * sx + sy * sy);
+      if (offset > r.swayMaxOffset) {
+        const scale = r.swayMaxOffset / offset;
+        receptor.tipX = restTipX + sx * scale;
+        receptor.tipY = restTipY + sy * scale;
+      }
+
+      // Recompute display normal from base→tip so the U arms pivot with the stem
+      const ndx = receptor.tipX - pt.x;
+      const ndy = receptor.tipY - pt.y;
+      const ndist = Math.sqrt(ndx * ndx + ndy * ndy) || 1;
+      receptor.nx = ndx / ndist;
+      receptor.ny = ndy / ndist;
     }
   }
 
