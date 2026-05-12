@@ -87,8 +87,67 @@ const RECEPTOR_DEFAULTS = {
   swayEnabled: true,
   swayStiffness: 0.08,    // Restoring force per unit tip displacement (per-frame units)
   swayDamping: 0.92,      // Per-frame velocity damping (1 = none, 0 = freeze)
-  swayBrownian: 0.05,     // Random impulse magnitude added to tip velocity each frame
+  swayBrownian: 0.02,     // Random impulse magnitude added to tip velocity each frame
   swayMaxOffset: 3        // Hard clamp on tip displacement from rest (px) — prevents stretch artifacts
+};
+
+// Fluidic background — vertical gradient backdrop plus a slow-drifting caustic shimmer
+// layer rendered from a low-res Perlin-noise grid and upscaled.  The shimmer reads as
+// soft light dappling through liquid; the gradient gives the plate depth.
+const BACKGROUND_DEFAULTS = {
+  enabled: true,
+
+  // Vertical gradient stops (RGB)
+  gradientTop: [218, 232, 245],
+  gradientMid: [242, 248, 252],
+  gradientBot: [210, 226, 240],
+  cornerRadius: 6,           // Rounded corners on the backdrop (matches original)
+
+  // Caustic shimmer overlay
+  shimmerEnabled: true,
+  shimmerResX: 80,           // Low-res noise grid width
+  shimmerResY: 45,           // Low-res noise grid height
+  shimmerScale: 0.06,        // Noise spatial frequency (per grid step — bigger = finer pattern)
+  shimmerSpeed: 0.006,       // Time step per frame for noise animation
+  shimmerStrength: 0.22,     // Overlay peak alpha (0–1)
+  shimmerContrast: 2.2,      // Power applied to noise — higher = sparser, more defined peaks
+  shimmerTint: [255, 255, 255], // RGB of bright caustic spots
+  shimmerThrottle: 1         // Update grid every N frames (2 halves cost with little visible loss)
+};
+
+// Bilipid membrane suggestion — a second parallel stroke offset inward from the membrane
+// (reads as the inner leaflet) plus optional faint dots at each shape vertex (reads as
+// phospholipid head groups).  Both layers are gated independently and use the cell's
+// tissue stroke color so palette consistency is preserved.
+const MEMBRANE_BILAYER = {
+  enabled: true,
+
+  // Inner leaflet stroke
+  innerStrokeEnabled: true,
+  innerOffset: 2.0,         // Pixels inward from the outer membrane
+  innerAlpha: 0.5,         // Stroke alpha (0–1)
+  innerLineWidth: 1.0,      // Stroke width in px
+
+  // Phospholipid head beads at each shape vertex
+  beadsEnabled: true,
+  beadRadius: 1.0,          // Bead radius in px (keep small — these are decorative)
+  beadAlpha: 0.45,          // Fill alpha (0–1)
+  beadOnInner: true         // Also draw beads on the inner leaflet
+};
+
+// Pseudo-3D shading on cells and nuclei.  Renders a radial highlight + shadow inside
+// the membrane to fake a sphere lit from a single direction.  lightDx/lightDy are unit
+// offsets from the cell center toward the light source (negative = upper-left).
+const CELL_SHADING = {
+  enabled: true,
+  lightDx: -0.35,           // Light-source offset from center (× radius). Negative = left.
+  lightDy: -0.35,           // Negative = up.
+  highlightStrength: 0.45,  // Peak alpha of the white highlight (0–1)
+  highlightReach: 1.1,      // Highlight fades to zero by this multiple of radius
+  shadowStrength: 0.35,     // Peak alpha of the dark terminator (0–1)
+  shadowInnerStop: 0.5,     // Shadow stays transparent inside this radius (× radius)
+  shadowReach: 2.0,         // Shadow reaches full strength at this multiple of radius
+  nucleusHighlightScale: 0.7 // Nucleus highlight relative to cell highlight (lower = subtler)
 };
 
 // Per-tissue color palette: fill (membrane interior) and stroke (outline / death segments)
@@ -110,4 +169,7 @@ window.RENDER_RESOLUTION = RENDER_RESOLUTION;
 window.LAYOUT_DEFAULTS = LAYOUT_DEFAULTS;
 window.SOFT_BODY_DEFAULTS = SOFT_BODY_DEFAULTS;
 window.RECEPTOR_DEFAULTS = RECEPTOR_DEFAULTS;
+window.CELL_SHADING = CELL_SHADING;
+window.MEMBRANE_BILAYER = MEMBRANE_BILAYER;
+window.BACKGROUND_DEFAULTS = BACKGROUND_DEFAULTS;
 window.TISSUE_COLORS = TISSUE_COLORS;

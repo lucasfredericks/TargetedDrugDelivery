@@ -607,9 +607,8 @@ class Simulation {
     this.buffer.background(250);
     this.buffer.push();
 
-    // Background
-    this.buffer.fill(240, 240, 255);
-    this.buffer.rect(0, 0, this.width, this.height, 6);
+    // Background — gradient backdrop + caustic shimmer (falls back to flat fill if disabled)
+    this.renderBackdrop(this.buffer);
 
     // Render fluid pressure field visualization if enabled (P key toggle)
     if (this.showPressureField && this.fluidSim && this.fluidSim.initialized) {
@@ -687,6 +686,107 @@ class Simulation {
     for (let d of this.debris) {
       d.render(this.buffer, this.physicsParams.particleSpriteSize);
     }
+  }
+
+  /**
+   * Draw the fluidic background: vertical gradient + animated caustic shimmer overlay,
+   * both clipped to the rounded-rect backdrop.  Falls back to the original flat lavender
+   * fill if BACKGROUND_DEFAULTS.enabled is false.
+   */
+  renderBackdrop(g) {
+    const bg = window.BACKGROUND_DEFAULTS;
+    if (!bg || !bg.enabled) {
+      g.fill(240, 240, 255);
+      g.rect(0, 0, this.width, this.height, 6);
+      return;
+    }
+
+    const ctx = g.drawingContext;
+    const w = this.width;
+    const h = this.height;
+    const r = bg.cornerRadius;
+
+    // Build rounded-rect path and clip
+    ctx.save();
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(0, 0, w, h, r);
+    } else {
+      // Manual fallback for older browsers
+      ctx.moveTo(r, 0);
+      ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r);
+      ctx.lineTo(w, h - r); ctx.quadraticCurveTo(w, h, w - r, h);
+      ctx.lineTo(r, h);     ctx.quadraticCurveTo(0, h, 0, h - r);
+      ctx.lineTo(0, r);     ctx.quadraticCurveTo(0, 0, r, 0);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    // Vertical gradient backdrop
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    const t = bg.gradientTop, m = bg.gradientMid, b = bg.gradientBot;
+    grad.addColorStop(0,   `rgb(${t[0]},${t[1]},${t[2]})`);
+    grad.addColorStop(0.5, `rgb(${m[0]},${m[1]},${m[2]})`);
+    grad.addColorStop(1,   `rgb(${b[0]},${b[1]},${b[2]})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Caustic shimmer overlay
+    if (bg.shimmerEnabled) {
+      if (!this.shimmerCanvas) this.initShimmer(bg);
+      const throttle = Math.max(1, bg.shimmerThrottle | 0);
+      if ((frameCount % throttle) === 0) this.updateShimmer(bg, frameCount);
+
+      const prevSmoothing = ctx.imageSmoothingEnabled;
+      const prevQuality = ctx.imageSmoothingQuality;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(this.shimmerCanvas, 0, 0, w, h);
+      ctx.imageSmoothingEnabled = prevSmoothing;
+      ctx.imageSmoothingQuality = prevQuality;
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Create the low-res offscreen canvas used as the caustic noise source.  Called lazily
+   * on the first backdrop render so we don't add work to the Simulation constructor.
+   */
+  initShimmer(bg) {
+    this.shimmerCanvas = document.createElement('canvas');
+    this.shimmerCanvas.width = bg.shimmerResX;
+    this.shimmerCanvas.height = bg.shimmerResY;
+    this.shimmerCtx = this.shimmerCanvas.getContext('2d');
+    this.shimmerImage = this.shimmerCtx.createImageData(bg.shimmerResX, bg.shimmerResY);
+  }
+
+  /**
+   * Repaint the shimmer noise field for this frame.  Samples 3D Perlin noise on the
+   * low-res grid, applies a contrast curve to sparsen the peaks, and writes the result
+   * into the shimmer ImageData as a white-tinted alpha-modulated layer.
+   */
+  updateShimmer(bg, frameCount) {
+    const data = this.shimmerImage.data;
+    const w = this.shimmerCanvas.width;
+    const h = this.shimmerCanvas.height;
+    const scale = bg.shimmerScale;
+    const t = frameCount * bg.shimmerSpeed;
+    const contrast = bg.shimmerContrast;
+    const tint = bg.shimmerTint;
+    const peakAlpha = bg.shimmerStrength * 255;
+    let i = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const n = noise(x * scale, y * scale, t);
+        const v = Math.pow(n, contrast);
+        data[i++] = tint[0];
+        data[i++] = tint[1];
+        data[i++] = tint[2];
+        data[i++] = v * peakAlpha;
+      }
+    }
+    this.shimmerCtx.putImageData(this.shimmerImage, 0, 0);
   }
 
   /**

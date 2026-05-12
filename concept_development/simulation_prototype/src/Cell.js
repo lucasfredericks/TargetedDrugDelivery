@@ -780,30 +780,203 @@ class Cell {
     }
     if (this.dead) return;
 
-    // Draw cell membrane outline with tissue-specific fill and stroke
     const f = this.tissueColor.fill;
     const s = this.tissueColor.stroke;
-    g.fill(f[0], f[1], f[2], f[3]);
-    g.stroke(s[0], s[1], s[2], s[3]);
-    g.strokeWeight(2);
-    g.beginShape();
-    for (let pt of this.shape) {
-      g.vertex(pt.x, pt.y);
-    }
-    g.endShape(CLOSE);
-    g.noStroke();
+    const shading = window.CELL_SHADING;
 
-    // Draw nucleus — slightly off-center filled ellipse that follows the cell centroid
-    const nx = this.cx + this.nucleusOffsetX;
-    const ny = this.cy + this.nucleusOffsetY;
-    if (this.isTumor) g.fill(180, 130, 145, 140);
-    else              g.fill(170, 180, 210, 110);
-    g.ellipse(nx, ny, this.nucleusRadiusX * 2, this.nucleusRadiusY * 2);
+    if (shading && shading.enabled) {
+      this.renderShadedMembrane(g, f, s, shading);
+      this.renderShadedNucleus(g, shading);
+    } else {
+      // Flat fallback — original rendering path
+      g.fill(f[0], f[1], f[2], f[3]);
+      g.stroke(s[0], s[1], s[2], s[3]);
+      g.strokeWeight(2);
+      g.beginShape();
+      for (let pt of this.shape) g.vertex(pt.x, pt.y);
+      g.endShape(CLOSE);
+      g.noStroke();
+
+      const nx = this.cx + this.nucleusOffsetX;
+      const ny = this.cy + this.nucleusOffsetY;
+      if (this.isTumor) g.fill(180, 130, 145, 140);
+      else              g.fill(170, 180, 210, 110);
+      g.ellipse(nx, ny, this.nucleusRadiusX * 2, this.nucleusRadiusY * 2);
+    }
+
+    // Bilipid membrane details — inner leaflet stroke + phospholipid head beads.
+    // Drawn after the membrane fill/stroke so it sits visually on top of the shading.
+    const bilayer = window.MEMBRANE_BILAYER;
+    if (bilayer && bilayer.enabled) {
+      this.renderBilayerDetails(g, bilayer);
+    }
 
     // Draw Y-shaped receptors
     for (let receptor of this.receptors) {
       receptor.render(g);
     }
+  }
+
+  // Draw the inner-leaflet parallel stroke and/or phospholipid head beads.  The inner
+  // polygon is computed by offsetting each shape vertex toward the centroid by a fixed
+  // pixel amount — works for the blob-shaped cells here because vertices are arranged
+  // around the centroid by construction.  Beads are batched into a single path for
+  // performance (one fill per cell instead of N arcs).
+  renderBilayerDetails(g, bilayer) {
+    const ctx = g.drawingContext;
+    const s = this.tissueColor.stroke;
+    const N = this.shape.length;
+    if (N === 0) return;
+
+    // Compute inner-offset polygon (used by both inner stroke and inner beads)
+    let innerShape = null;
+    const needInner = bilayer.innerStrokeEnabled
+                   || (bilayer.beadsEnabled && bilayer.beadOnInner);
+    if (needInner) {
+      innerShape = new Array(N);
+      for (let i = 0; i < N; i++) {
+        const pt = this.shape[i];
+        const dx = this.cx - pt.x;
+        const dy = this.cy - pt.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const f = bilayer.innerOffset / dist;
+        innerShape[i] = { x: pt.x + dx * f, y: pt.y + dy * f };
+      }
+    }
+
+    // Inner leaflet stroke
+    if (bilayer.innerStrokeEnabled && innerShape) {
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const pt = innerShape[i];
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `rgba(${s[0]},${s[1]},${s[2]},${bilayer.innerAlpha})`;
+      ctx.lineWidth = bilayer.innerLineWidth;
+      ctx.stroke();
+    }
+
+    // Phospholipid head beads — single batched path for speed
+    if (bilayer.beadsEnabled) {
+      const r = bilayer.beadRadius;
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const pt = this.shape[i];
+        ctx.moveTo(pt.x + r, pt.y);
+        ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+      }
+      if (bilayer.beadOnInner && innerShape) {
+        for (let i = 0; i < N; i++) {
+          const pt = innerShape[i];
+          ctx.moveTo(pt.x + r, pt.y);
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+        }
+      }
+      ctx.fillStyle = `rgba(${s[0]},${s[1]},${s[2]},${bilayer.beadAlpha})`;
+      ctx.fill();
+    }
+  }
+
+  // Paint the membrane as a base color + radial highlight + radial shadow, clipped to
+  // the shape polygon.  Uses the underlying canvas 2D context for the gradient fills,
+  // then strokes the outline through the same context for visual consistency.
+  renderShadedMembrane(g, f, s, shading) {
+    const ctx = g.drawingContext;
+    const r = this.radius;
+    const lx = this.cx + shading.lightDx * r;
+    const ly = this.cy + shading.lightDy * r;
+    const baseA = f[3] / 255;
+
+    // Bounding rect for fillRect — large enough to cover the cell after clipping
+    const bx = this.cx - r * 2;
+    const by = this.cy - r * 2;
+    const bw = r * 4;
+    const bh = r * 4;
+
+    // Build membrane path
+    ctx.beginPath();
+    for (let i = 0; i < this.shape.length; i++) {
+      const pt = this.shape[i];
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.closePath();
+
+    ctx.save();
+    ctx.clip();
+
+    // Layer 1: base tissue color
+    ctx.fillStyle = `rgba(${f[0]},${f[1]},${f[2]},${baseA})`;
+    ctx.fillRect(bx, by, bw, bh);
+
+    // Layer 2: white highlight, brightest at the light source
+    const hGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, r * shading.highlightReach);
+    hGrad.addColorStop(0, `rgba(255,255,255,${shading.highlightStrength})`);
+    hGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hGrad;
+    ctx.fillRect(bx, by, bw, bh);
+
+    // Layer 3: dark terminator, transparent near light, deepest at far edge
+    const shGrad = ctx.createRadialGradient(lx, ly, r * shading.shadowInnerStop, lx, ly, r * shading.shadowReach);
+    shGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    shGrad.addColorStop(1, `rgba(0,0,0,${shading.shadowStrength})`);
+    ctx.fillStyle = shGrad;
+    ctx.fillRect(bx, by, bw, bh);
+
+    ctx.restore();
+
+    // Stroke the outline (path was consumed by clip — rebuild it)
+    ctx.beginPath();
+    for (let i = 0; i < this.shape.length; i++) {
+      const pt = this.shape[i];
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(${s[0]},${s[1]},${s[2]},${s[3] / 255})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Nucleus with the same light direction as the cell — subtler highlight, no shadow
+  // layer (the nucleus is small enough that a single bright spot reads as 3D on its own).
+  renderShadedNucleus(g, shading) {
+    const ctx = g.drawingContext;
+    const nx = this.cx + this.nucleusOffsetX;
+    const ny = this.cy + this.nucleusOffsetY;
+    const rx = this.nucleusRadiusX;
+    const ry = this.nucleusRadiusY;
+
+    const nucColor = this.isTumor ? [180, 130, 145, 140] : [170, 180, 210, 110];
+    const baseA = nucColor[3] / 255;
+
+    const bx = nx - rx * 2;
+    const by = ny - ry * 2;
+    const bw = rx * 4;
+    const bh = ry * 4;
+
+    ctx.beginPath();
+    ctx.ellipse(nx, ny, rx, ry, 0, 0, Math.PI * 2);
+    ctx.closePath();
+
+    ctx.save();
+    ctx.clip();
+
+    ctx.fillStyle = `rgba(${nucColor[0]},${nucColor[1]},${nucColor[2]},${baseA})`;
+    ctx.fillRect(bx, by, bw, bh);
+
+    const lx = nx + shading.lightDx * rx;
+    const ly = ny + shading.lightDy * ry;
+    const hGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, rx * shading.highlightReach);
+    const hAlpha = shading.highlightStrength * shading.nucleusHighlightScale;
+    hGrad.addColorStop(0, `rgba(255,255,255,${hAlpha})`);
+    hGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hGrad;
+    ctx.fillRect(bx, by, bw, bh);
+
+    ctx.restore();
   }
 
   // Render membrane segments flying apart with fade
