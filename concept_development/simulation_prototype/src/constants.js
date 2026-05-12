@@ -67,7 +67,7 @@ const SOFT_BODY_DEFAULTS = {
   tumorNoiseAmplitude: 0.5,  // Perlin noise amplitude for tumor cell shape (±20%)
   normalNoiseAmplitude: 0.08, // Perlin noise amplitude for non-tumor cell shape (±8%)
   breathPeriodFrames: 300,    // Period of slow membrane breathing (~5s at 60fps)
-  breathAmplitude: 0.04,      // Fractional radius/area swing during breath cycle (±2%)
+  breathAmplitude: 0.02,      // Fractional radius/area swing during breath cycle (±2%)
   neighborRepulsionStrength: 0.08, // Per-pixel-overlap force for cell-cell contact flattening
   neighborRepulsionMargin: 30,     // px buffer beyond r1+r2 where soft contact engages
   enabled: true
@@ -130,7 +130,7 @@ const MEMBRANE_BILAYER = {
 
   // Phospholipid head beads at each shape vertex
   beadsEnabled: true,
-  beadRadius: 1.0,          // Bead radius in px (keep small — these are decorative)
+  beadRadius: 2.0,          // Bead radius in px (keep small — these are decorative)
   beadAlpha: 0.45,          // Fill alpha (0–1)
   beadOnInner: true         // Also draw beads on the inner leaflet
 };
