@@ -67,10 +67,20 @@ const SOFT_BODY_DEFAULTS = {
   tumorNoiseAmplitude: 0.5,  // Perlin noise amplitude for tumor cell shape (±20%)
   normalNoiseAmplitude: 0.08, // Perlin noise amplitude for non-tumor cell shape (±8%)
   breathPeriodFrames: 300,    // Period of slow membrane breathing (~5s at 60fps)
-  breathAmplitude: 0.02,      // Fractional radius/area swing during breath cycle (±2%)
+  breathAmplitude: 0.04,      // Fractional radius/area swing during breath cycle (±2%)
   neighborRepulsionStrength: 0.08, // Per-pixel-overlap force for cell-cell contact flattening
   neighborRepulsionMargin: 30,     // px buffer beyond r1+r2 where soft contact engages
   enabled: true
+};
+
+// Receptor U-shape geometry — tweak to experiment with the open/bound visual.
+// All "Scale" values are multiples of the receptor's branchLen.
+const RECEPTOR_DEFAULTS = {
+  baseWidthScale: 1.0,   // Width of the U's flat bottom segment (perpendicular to stem)
+  armLenScale: 1.0,      // Length of each arm rising from the bottom
+  armAngleDeg: 15,       // Outward splay of arms from the stem axis (0 = parallel arms)
+  latchedScale: 1.2,     // Whole-shape size multiplier when bound/refractory
+  refractoryDurationFrames: 150  // Frames the receptor stays in refractory after absorption (~5s @ 60fps)
 };
 
 // Per-tissue color palette: fill (membrane interior) and stroke (outline / death segments)
@@ -91,4 +101,5 @@ window.EXPRESSION_SCALING = EXPRESSION_SCALING;
 window.RENDER_RESOLUTION = RENDER_RESOLUTION;
 window.LAYOUT_DEFAULTS = LAYOUT_DEFAULTS;
 window.SOFT_BODY_DEFAULTS = SOFT_BODY_DEFAULTS;
+window.RECEPTOR_DEFAULTS = RECEPTOR_DEFAULTS;
 window.TISSUE_COLORS = TISSUE_COLORS;
