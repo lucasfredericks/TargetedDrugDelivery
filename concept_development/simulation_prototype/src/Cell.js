@@ -20,15 +20,21 @@ class Cell {
     this.deathDuration = 180; // 3 seconds at 60fps
     this.deathSegments = [];  // Membrane line segments flying apart
 
-    // Store receptor concentrations
-    this.receptorConcentrations = receptorConcentrations || [0, 0, 0, 0, 0, 0];
+    // Store receptor concentrations as an owned copy so later mutations of the
+    // source array (e.g. dashboard slider edits on the shared tissue.receptors)
+    // can't change this cell's allocation out from under it.
+    this.receptorConcentrations = receptorConcentrations
+      ? receptorConcentrations.slice(0, 6)
+      : [0, 0, 0, 0, 0, 0];
     this.totalExpression = this.receptorConcentrations.reduce((sum, c) => sum + (c || 0), 0);
 
-    // Calculate total receptors needed (each color gets its full allocation)
+    // Calculate total receptors needed (each color gets its full allocation).
+    // Concentrations < 0.1 are treated as zero so trace expression draws no receptors.
     const maxPerColor = PHYSICS_DEFAULTS.maxReceptorsPerColor;
     this.totalReceptorsNeeded = 0;
     for (let i = 0; i < 6; i++) {
-      this.totalReceptorsNeeded += Math.round((this.receptorConcentrations[i] || 0) * maxPerColor);
+      const c = this.receptorConcentrations[i] || 0;
+      this.totalReceptorsNeeded += (c < 0.1) ? 0 : Math.round(c * maxPerColor);
     }
 
     // Scale size based on expression (0.6x to 1.2x)
@@ -97,11 +103,13 @@ class Cell {
     this.receptors = [];
     const maxPerColor = PHYSICS_DEFAULTS.maxReceptorsPerColor;
 
-    // Calculate receptor count for each color (full allocation, no scaling)
+    // Calculate receptor count for each color (full allocation, no scaling).
+    // Concentrations < 0.1 are treated as zero so trace expression draws no receptors.
     const receptorCounts = [];
     let totalReceptors = 0;
     for (let color = 0; color < 6; color++) {
-      const count = Math.round((this.receptorConcentrations[color] || 0) * maxPerColor);
+      const c = this.receptorConcentrations[color] || 0;
+      const count = (c < 0.1) ? 0 : Math.round(c * maxPerColor);
       receptorCounts.push(count);
       totalReceptors += count;
     }
@@ -811,6 +819,16 @@ class Cell {
       this.renderBilayerDetails(g, bilayer);
     }
 
+    // The membrane and bilayer passes write ctx.strokeStyle/fillStyle directly
+    // (raw canvas2D), which leaves p5's _cachedStrokeStyle/_cachedFillStyle out
+    // of sync.  p5's stroke()/fill() short-circuits when the requested value
+    // matches its cache — so without this reset, the second-and-onward cell's
+    // receptors keep the bilayer's membrane-color stroke and never update.
+    if (g._renderer) {
+      g._renderer._cachedStrokeStyle = null;
+      g._renderer._cachedFillStyle = null;
+    }
+
     // Draw Y-shaped receptors
     for (let receptor of this.receptors) {
       receptor.render(g);
@@ -1102,11 +1120,13 @@ class Cell {
     this.receptorConcentrations = receptorConcentrations || [0, 0, 0, 0, 0, 0];
     this.totalExpression = this.receptorConcentrations.reduce((sum, c) => sum + (c || 0), 0);
 
-    // Calculate total receptors needed (each color gets its full allocation)
+    // Calculate total receptors needed (each color gets its full allocation).
+    // Concentrations < 0.1 are treated as zero so trace expression draws no receptors.
     const maxPerColor = PHYSICS_DEFAULTS.maxReceptorsPerColor;
     this.totalReceptorsNeeded = 0;
     for (let i = 0; i < 6; i++) {
-      this.totalReceptorsNeeded += Math.round((this.receptorConcentrations[i] || 0) * maxPerColor);
+      const c = this.receptorConcentrations[i] || 0;
+      this.totalReceptorsNeeded += (c < 0.1) ? 0 : Math.round(c * maxPerColor);
     }
 
     // Recalculate size factor

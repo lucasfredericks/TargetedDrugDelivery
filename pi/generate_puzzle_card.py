@@ -240,8 +240,9 @@ def main():
                         help="Output format (default: pdf)")
     args = parser.parse_args()
 
+    from puzzle_format import normalize_puzzle
     with open(args.puzzle_json) as f:
-        puzzle = json.load(f)
+        puzzle = normalize_puzzle(json.load(f))
 
     ext = args.format
     if args.output:

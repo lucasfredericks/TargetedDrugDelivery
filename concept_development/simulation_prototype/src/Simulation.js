@@ -922,19 +922,13 @@ class Simulation {
   }
 
   /**
-   * Update tissue configuration (regenerates cells if receptors changed)
+   * Update tissue configuration. Always regenerates cells so a fresh, uniform
+   * receptor allocation is guaranteed (the previous comparison-based shortcut
+   * occasionally left cells in a stale state when only one slider was non-zero).
    */
   setTissue(tissue) {
-    const receptorsChanged = !this.tissue.receptors ||
-      this.tissue.receptors.some((v, idx) => v !== (tissue.receptors[idx] || 0));
-
     this.tissue = tissue;
-
-    if (receptorsChanged) {
-      // Regenerate all cells with new concentrations
-      // Cell count adjusts based on expression level (larger cells = fewer cells)
-      this.generateCells();
-    }
+    this.generateCells();
     this.theoreticalScore = this.computeTheoreticalScore();
   }
 

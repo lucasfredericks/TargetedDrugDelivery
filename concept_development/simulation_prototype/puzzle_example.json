@@ -1,11 +1,62 @@
 {
   "id": "example-01",
-  "ligandCounts": [2, 1, 0, 1, 1, 1],
   "toxicity": 2,
+  "ligands": [
+    { "color": "Red",    "count": 2 },
+    { "color": "Blue",   "count": 1 },
+    { "color": "Green",  "count": 0 },
+    { "color": "Purple", "count": 1 },
+    { "color": "Orange", "count": 1 },
+    { "color": "Yellow", "count": 1 }
+  ],
   "tissues": [
-    { "name": "Tumor", "receptors": [0.8,0.6,0.2,0.1,0.05,0.1] },
-    { "name": "Heart", "receptors": [0.1,0.2,0.8,0.1,0.05,0.2] },
-    { "name": "Liver", "receptors": [0.05,0.1,0.2,0.8,0.6,0.2] },
-    { "name": "Lung", "receptors": [0.2,0.1,0.3,0.2,0.8,0.1] }
+    {
+      "name": "Tumor",
+      "deathThreshold": 5,
+      "receptors": [
+        { "color": "Red",    "value": 0.8 },
+        { "color": "Blue",   "value": 0.6 },
+        { "color": "Green",  "value": 0.2 },
+        { "color": "Purple", "value": 0.1 },
+        { "color": "Orange", "value": 0 },
+        { "color": "Yellow", "value": 0.1 }
+      ]
+    },
+    {
+      "name": "Heart",
+      "deathThreshold": 5,
+      "receptors": [
+        { "color": "Red",    "value": 0.1 },
+        { "color": "Blue",   "value": 0.2 },
+        { "color": "Green",  "value": 0.8 },
+        { "color": "Purple", "value": 0.1 },
+        { "color": "Orange", "value": 0 },
+        { "color": "Yellow", "value": 0.2 }
+      ]
+    },
+    {
+      "name": "Liver",
+      "deathThreshold": 5,
+      "receptors": [
+        { "color": "Red",    "value": 0 },
+        { "color": "Blue",   "value": 0.1 },
+        { "color": "Green",  "value": 0.2 },
+        { "color": "Purple", "value": 0.8 },
+        { "color": "Orange", "value": 0.6 },
+        { "color": "Yellow", "value": 0.2 }
+      ]
+    },
+    {
+      "name": "Lung",
+      "deathThreshold": 5,
+      "receptors": [
+        { "color": "Red",    "value": 0.2 },
+        { "color": "Blue",   "value": 0.1 },
+        { "color": "Green",  "value": 0.3 },
+        { "color": "Purple", "value": 0.2 },
+        { "color": "Orange", "value": 0.8 },
+        { "color": "Yellow", "value": 0.1 }
+      ]
+    }
   ]
 }

@@ -41,13 +41,15 @@ function setup() {
   // Get scoreboard element
   scoreboardDiv = document.getElementById('scoreboard');
 
-  // Setup network (Socket.IO if ?server= param, else BroadcastChannel)
-  setupNetwork();
-
-  // Load puzzle and create simulations
+  // Load puzzle and create simulations, THEN connect to the network.
+  // Connecting after simulations exist guarantees that any start_test or
+  // ligand_update arriving immediately after register_client has a populated
+  // `simulations` array to apply config to — otherwise the client would
+  // silently miss a test that began during page load.
   fetch('puzzle_example.json')
     .then(r => r.json())
     .then(p => {
+      normalizePuzzle(p);
       puzzle = p;
       globalParams.toxicity = p.toxicity || 2;
 
@@ -63,6 +65,9 @@ function setup() {
       // Create with default puzzle if load fails
       puzzle = createDefaultPuzzle();
       createSimulations();
+    })
+    .finally(() => {
+      setupNetwork();
     });
 }
 
@@ -350,6 +355,7 @@ function sendStats() {
 }
 
 function applyPuzzle(p) {
+  normalizePuzzle(p);
   puzzle = p;
 
   // Update each simulation with its tissue config
@@ -381,6 +387,7 @@ function applyPuzzle(p) {
 // Apply puzzle tissue/receptor config without overwriting ligand positions
 // Used when dashboard sends params - dashboard ligandPositions take precedence
 function applyPuzzleWithoutLigands(p) {
+  normalizePuzzle(p);
   puzzle = p;
 
   // Update each simulation with its tissue config

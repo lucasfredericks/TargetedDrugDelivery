@@ -227,10 +227,11 @@
       id: puzzleIdInput.value.trim() || puzzle.id || 'custom-puzzle',
       toxicity: toxicity,
       constructorNotes: constructorNotesInput.value.trim(),
+      ligands: ligandCountsToNamed(computeLigandCountsFromPositions(ligandSlots)),
       tissues: puzzle.tissues.map(t => ({
         name: t.name,
-        receptors: t.receptors.map(r => parseFloat(r.toFixed(4))),
-        deathThreshold: t.deathThreshold || 5
+        deathThreshold: t.deathThreshold || 5,
+        receptors: receptorsToNamed(t.receptors)
       }))
     };
   }
@@ -270,14 +271,14 @@
         const ctrl = document.createElement('div'); ctrl.style.minWidth='140px';
         const label = document.createElement('label'); label.style.display='block'; label.style.fontSize='12px'; label.style.marginBottom='2px';
         // label receptor sliders by color to match ligand color indices
-        label.textContent = `${colorNames[ri]} receptor: ` + (t.receptors[ri]||0).toFixed(2);
-        const input = document.createElement('input'); input.type = 'range'; input.min = 0; input.max = 1; input.step = 0.01; input.value = (t.receptors[ri]||0);
+        label.textContent = `${colorNames[ri]} receptor: ` + (t.receptors[ri]||0).toFixed(1);
+        const input = document.createElement('input'); input.type = 'range'; input.min = 0; input.max = 1; input.step = 0.1; input.value = (t.receptors[ri]||0);
         input.style.width = '120px';
         input.oninput = (e)=>{
-          const v = parseFloat(e.target.value);
+          const v = Math.round(parseFloat(e.target.value) * 10) / 10;
           t.receptors[ri] = v;
           // update label and preview; auto-send after debounce
-          label.textContent = `${colorNames[ri]} receptor: ` + v.toFixed(2);
+          label.textContent = `${colorNames[ri]} receptor: ` + v.toFixed(1);
           updatePuzzleView();
           updateTheoreticalScores();
           debouncedSendParams();
@@ -289,10 +290,10 @@
       // Randomize button handler
       randomizeBtn.onclick = ()=>{
         controls.forEach(c => {
-          const randomValue = Math.random();
+          const randomValue = Math.round(Math.random() * 10) / 10;
           t.receptors[c.receptorIndex] = randomValue;
           c.input.value = randomValue;
-          c.label.textContent = `${colorNames[c.receptorIndex]} receptor: ` + randomValue.toFixed(2);
+          c.label.textContent = `${colorNames[c.receptorIndex]} receptor: ` + randomValue.toFixed(1);
         });
         updatePuzzleView();
         updateTheoreticalScores();
@@ -344,10 +345,11 @@
   };
 
   function loadPuzzle(p) {
+    normalizePuzzle(p);
     window.currentPuzzle = p;
     puzzleIdInput.value = p.id || 'custom-puzzle';
     constructorNotesInput.value = p.constructorNotes || '';
-    puzzleView.textContent = JSON.stringify(p, null, 2);
+    if (typeof p.toxicity === 'number') toxicity = p.toxicity;
     // default populate ligandSlots from counts if provided
     if (Array.isArray(p.ligandCounts)){
       let pos = [];
@@ -357,6 +359,7 @@
       drawPreview();
     }
     renderTissueControls(p);
+    updatePuzzleView();
     sendParams();
   }
 

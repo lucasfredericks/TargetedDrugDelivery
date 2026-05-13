@@ -36,6 +36,10 @@ class ExhibitStateMachine:
         self.ligand_positions = None
         self.ligand_colors = None
         self.current_puzzle = None
+        # Puzzle queued by a tag scan that arrived during TESTING.  Drained
+        # into current_puzzle when the test ends (via restart_test or
+        # complete_test) so chaotic tag-swap usage isn't silently dropped.
+        self.pending_puzzle = None
         self.test_results = None
         self._listeners = []
 
@@ -72,11 +76,23 @@ class ExhibitStateMachine:
         return True
 
     def load_puzzle(self, puzzle):
-        """Record a puzzle load. Valid after nanoparticle scan or after results."""
+        """Record a puzzle load. Valid after nanoparticle scan or after results.
+
+        If called during TESTING, the puzzle is stored as pending and will be
+        promoted to current_puzzle when the test ends.  Returns True only on
+        immediate application.
+        """
         if self.state in (State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED, State.RESULTS):
             self.current_puzzle = puzzle
+            # Any pending puzzle is now stale — the latest scan supersedes it.
+            self.pending_puzzle = None
             self.transition(State.PUZZLE_LOADED)
             return True
+        if self.state == State.TESTING:
+            # Tag swapped mid-test: queue the puzzle so the next exit from
+            # TESTING (restart or natural complete) picks it up.
+            self.pending_puzzle = puzzle
+            logger.info("Puzzle queued (test in progress); will apply on exit")
         return False
 
     def start_test(self):
@@ -90,15 +106,30 @@ class ExhibitStateMachine:
         """Transition TESTING → PUZZLE_LOADED so a fresh test can be started.
 
         Preserves current_puzzle and ligand_positions so the restart uses the
-        same nanoparticle and tissue configuration without re-scanning.
+        same nanoparticle and tissue configuration without re-scanning, then
+        drains any pending puzzle queued during the test.
         """
-        return self.transition(State.PUZZLE_LOADED)
+        if self.transition(State.PUZZLE_LOADED):
+            self._apply_pending_puzzle()
+            return True
+        return False
 
     def complete_test(self, results):
         """Record test completion with final results."""
         if self.state == State.TESTING:
             self.test_results = results
-            return self.transition(State.RESULTS)
+            if self.transition(State.RESULTS):
+                self._apply_pending_puzzle()
+                return True
+        return False
+
+    def _apply_pending_puzzle(self):
+        """Promote any queued puzzle to current_puzzle. Returns True if a swap occurred."""
+        if self.pending_puzzle is not None:
+            logger.info("Applying pending puzzle queued during test")
+            self.current_puzzle = self.pending_puzzle
+            self.pending_puzzle = None
+            return True
         return False
 
     def reset(self):
@@ -108,6 +139,7 @@ class ExhibitStateMachine:
         self.ligand_positions = None
         self.ligand_colors = None
         self.current_puzzle = None
+        self.pending_puzzle = None
         self.test_results = None
         logger.info("State: %s → IDLE (reset)", old.name)
         self._notify(old)

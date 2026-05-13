@@ -17,6 +17,7 @@ import glob
 import serial
 
 from config import PUZZLES_DIR, PUZZLES_INDEX_PATH, SERIAL_BAUD, SERIAL_TIMEOUT
+from puzzle_format import normalize_puzzle
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ class ArduinoRFIDService:
             logger.error("Puzzle file not found: %s", path)
             return None
         with open(path, "r") as f:
-            return json.load(f)
+            return normalize_puzzle(json.load(f))
 
     def scan_and_load(self):
         """Return (uid, puzzle) for the currently present tag, or (None, None)."""

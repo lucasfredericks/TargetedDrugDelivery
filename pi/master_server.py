@@ -307,24 +307,44 @@ def action_scan_rfid(uid=None):
         _emit_to_display("error", {"message": f"Unknown puzzle tag: {puzzle_id}"})
         return
 
-    # Ensure state machine is ready — tag detection implies nanoparticle is
-    # present even if the sensor poll hasn't run yet.
-    if state_machine.state == State.IDLE:
+    # Force a fresh sensor read so ligand_positions reflects the current
+    # nanoparticle at the moment of tag detection — without this, a tag
+    # scanned faster than the 1-second poll cycle (or before any poll has
+    # run) would launch a test with empty/stale ligands.  Skipped during
+    # TESTING so the running test's snapshot isn't perturbed.
+    if (sensor_service is not None
+            and state_machine.state != State.TESTING):
+        try:
+            from eventlet import tpool
+            result = tpool.execute(_do_sensor_read, sensor_service)
+            state_machine.scan_nanoparticle(
+                result["ligandPositions"], result["colors"]
+            )
+        except Exception as e:
+            logger.warning("Sensor read during RFID scan failed: %s", e)
+    elif state_machine.state == State.IDLE:
+        # No sensor service path (e.g., --no-sensors): bootstrap state so
+        # load_puzzle can transition out of IDLE.
         from config import NUM_SENSORS, COLOR_NONE
         state_machine.scan_nanoparticle(
             state_machine.ligand_positions or [COLOR_NONE] * NUM_SENSORS,
             state_machine.ligand_colors or ["None"] * NUM_SENSORS,
         )
 
-    state_machine.load_puzzle(puzzle)
-    _emit_to_display("puzzle_loaded", {"puzzleId": puzzle_id, "puzzle": puzzle})
-    # Push puzzle tissue config to sim clients so affinity preview updates immediately
-    if state_machine.state != State.TESTING:
+    if state_machine.load_puzzle(puzzle):
+        _emit_to_display("puzzle_loaded", {"puzzleId": puzzle_id, "puzzle": puzzle})
         socketio.emit("ligand_update", {
             "ligandPositions": state_machine.ligand_positions,
             "puzzle": puzzle,
         }, room="sim_clients")
-    logger.info("Puzzle loaded: %s", puzzle_id)
+        logger.info("Puzzle loaded: %s", puzzle_id)
+    else:
+        # Tag scanned during TESTING — state_machine queued it as pending;
+        # it will be applied (and re-emitted) when the test ends.  Avoid
+        # emitting puzzle_loaded so the display doesn't show a puzzle that
+        # isn't actually active.
+        logger.info("Puzzle %s queued for after test (state: %s)",
+                    puzzle_id, state_machine.state.name)
 
 
 def action_start_test():
@@ -473,6 +493,13 @@ def _check_test_done():
         all_results = client_manager.get_aggregated_stats()
         state_machine.complete_test(all_results)
         _emit_to_display("test_complete", {"finalResults": all_results})
+        # complete_test() may have drained a pending puzzle queued by a
+        # tag swap during the test.  Push the current puzzle to sim clients
+        # so receptor concentrations reflect any swap before the next test.
+        socketio.emit("ligand_update", {
+            "ligandPositions": state_machine.ligand_positions,
+            "puzzle": state_machine.current_puzzle,
+        }, room="sim_clients")
         logger.info("Test complete. Final results collected.")
     elif client_manager.no_completers_left():
         logger.warning("All expected completers disconnected; auto-resetting exhibit")
@@ -549,33 +576,45 @@ def _sensor_poll_loop():
     from config import NUM_SENSORS, COLOR_NONE
     empty_positions = [COLOR_NONE] * NUM_SENSORS
     empty_colors = ["None"] * NUM_SENSORS
+    prev_tag_present = None  # None forces an emit on first iteration
     while True:
-        socketio.sleep(1)
+        # Yield to other greenlets, but don't add dead time between sweeps —
+        # a full 6-sensor sweep already takes ~1s due to integration.
+        socketio.sleep(0.05)
         svc = sensor_service
         if svc is None:
             break
-        # No tag present → all slots empty, skip I2C reads
+        # No tag present → emit empty state once on the transition, then idle.
+        # Calibration runs as a standalone script with its own SensorService,
+        # so this gate doesn't affect it.
         tag_present = (arduino_rfid is not None
                        and arduino_rfid.current_tag_uid is not None)
         if not tag_present:
-            _emit_to_display("nanoparticle_scanned", {
-                "ligandPositions": empty_positions,
-                "colors": empty_colors,
-                "tagPresent": False,
-            })
+            if prev_tag_present is not False:
+                _emit_to_display("nanoparticle_scanned", {
+                    "ligandPositions": empty_positions,
+                    "colors": empty_colors,
+                    "tagPresent": False,
+                })
+                prev_tag_present = False
+            socketio.sleep(0.25)
             continue
+        prev_tag_present = True
         try:
             result = tpool.execute(_do_sensor_read, svc)
             positions = result["ligandPositions"]
             colors = result["colors"]
-            # Keep state machine in sync so start_test sends current colors
-            state_machine.scan_nanoparticle(positions, colors)
+            # Always update the operator display so live sensor readings are
+            # visible.  But during TESTING, do NOT mutate state_machine —
+            # if the user briefly moves the nanoparticle off the pad mid-test
+            # the read would corrupt the snapshot used by the next restart.
             _emit_to_display("nanoparticle_scanned", {
                 "ligandPositions": positions,
                 "colors": colors,
                 "tagPresent": True,
             })
             if state_machine.state != State.TESTING:
+                state_machine.scan_nanoparticle(positions, colors)
                 socketio.emit("ligand_update", {
                     "ligandPositions": positions,
                     "puzzle": state_machine.current_puzzle,
