@@ -1,7 +1,22 @@
 """Exhibit workflow state machine.
 
-States:
-    IDLE → NANOPARTICLE_SCANNED → PUZZLE_LOADED → TESTING → RESULTS → IDLE
+Happy path:
+    IDLE → NANOPARTICLE_SCANNED → PUZZLE_LOADED → TESTING → RESULTS
+
+Plus two cross-cutting edges available everywhere:
+    * any state → IDLE          (reset: watchdog, lost clients, manual)
+    * TESTING/RESULTS → PUZZLE_LOADED  (re-run with the same nanoparticle)
+
+`TRANSITIONS` is the single source of truth: every state change goes through
+`transition()`, which rejects edges not listed here.  Side effects (Socket.IO
+emits) are NOT performed here — callers register an `on_change` listener and
+react to (old, new) so the "what does each state notify" logic lives in one
+place (see master_server._on_state_change).
+
+Threading: this object is mutated only from the master server's single
+eventlet event loop (Arduino OS-thread callbacks are marshalled onto it via
+an action queue), so methods here assume cooperative, non-reentrant access
+and take no locks.
 """
 
 import logging
@@ -18,14 +33,17 @@ class State(Enum):
     RESULTS = auto()
 
 
-# Valid state transitions
+# Valid state transitions. Every state additionally allows → IDLE (reset),
+# folded in below so it doesn't have to be repeated on each line.
 TRANSITIONS = {
     State.IDLE: {State.NANOPARTICLE_SCANNED},
-    State.NANOPARTICLE_SCANNED: {State.PUZZLE_LOADED, State.NANOPARTICLE_SCANNED},
-    State.PUZZLE_LOADED: {State.TESTING, State.NANOPARTICLE_SCANNED, State.PUZZLE_LOADED},
-    State.TESTING: {State.RESULTS, State.PUZZLE_LOADED},
-    State.RESULTS: {State.IDLE, State.TESTING, State.PUZZLE_LOADED},
+    State.NANOPARTICLE_SCANNED: {State.PUZZLE_LOADED},
+    State.PUZZLE_LOADED: {State.TESTING, State.PUZZLE_LOADED},  # self-loop: re-scan a new tag
+    State.TESTING: {State.RESULTS, State.PUZZLE_LOADED},        # → PUZZLE_LOADED: restart
+    State.RESULTS: {State.PUZZLE_LOADED},                       # → PUZZLE_LOADED: re-run
 }
+for _src in TRANSITIONS:
+    TRANSITIONS[_src].add(State.IDLE)
 
 
 class ExhibitStateMachine:
@@ -87,9 +105,9 @@ class ExhibitStateMachine:
         return False
 
     def restart_test(self):
-        """Transition TESTING → PUZZLE_LOADED so a fresh test can be started.
+        """Step back to PUZZLE_LOADED to re-run a test. Valid from TESTING or RESULTS.
 
-        Preserves current_puzzle and ligand_positions so the restart uses the
+        Preserves current_puzzle and ligand_positions so the re-run uses the
         same nanoparticle and tissue configuration without re-scanning.
         """
         return self.transition(State.PUZZLE_LOADED)
@@ -102,15 +120,12 @@ class ExhibitStateMachine:
         return False
 
     def reset(self):
-        """Return to idle. Valid from any state."""
-        old = self.state
-        self.state = State.IDLE
+        """Return to idle from any state, clearing all session data."""
         self.ligand_positions = None
         self.ligand_colors = None
         self.current_puzzle = None
         self.test_results = None
-        logger.info("State: %s → IDLE (reset)", old.name)
-        self._notify(old)
+        self.transition(State.IDLE)
 
     def get_status(self):
         """Return current state and data as a serializable dict."""

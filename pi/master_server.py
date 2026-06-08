@@ -171,7 +171,7 @@ def handle_connect():
 @socketio.on("disconnect")
 def handle_disconnect():
     sid = _sid()
-    was_expected = sid in client_manager._expected_completers
+    was_expected = client_manager.is_expected_completer(sid)
     client_manager.unregister(sid)
     logger.info("Client disconnected: %s", sid)
     _emit_to_display("client_count", {"count": client_manager.count})
@@ -316,49 +316,39 @@ def action_scan_rfid(uid=None):
             state_machine.ligand_colors or ["None"] * NUM_SENSORS,
         )
 
-    state_machine.load_puzzle(puzzle)
-    _emit_to_display("puzzle_loaded", {"puzzleId": puzzle_id, "puzzle": puzzle})
-    # Push puzzle tissue config to sim clients so affinity preview updates immediately
-    if state_machine.state != State.TESTING:
-        socketio.emit("ligand_update", {
-            "ligandPositions": state_machine.ligand_positions,
-            "puzzle": puzzle,
-        }, room="sim_clients")
+    # load_puzzle transitions to PUZZLE_LOADED (→ observer emits "puzzle_loaded"
+    # to the display).  It returns False when scanned mid-TESTING — in that case
+    # nothing is loaded and nothing is emitted, so the display can't show a
+    # puzzle that isn't actually active.
+    if not state_machine.load_puzzle(puzzle):
+        logger.info("Tag %s ignored in state %s", puzzle_id, state_machine.state.name)
+        return
+
+    # Push puzzle tissue config to sim clients so affinity preview updates immediately.
+    socketio.emit("ligand_update", {
+        "ligandPositions": state_machine.ligand_positions,
+        "puzzle": puzzle,
+    }, room="sim_clients")
     logger.info("Puzzle loaded: %s", puzzle_id)
 
 
 def action_start_test():
-    """Send test command to all connected simulation clients."""
-    # Validate preconditions BEFORE transitioning state.
+    """Lock the client set and enter TESTING (which broadcasts start_test)."""
     if client_manager.count == 0:
         logger.warning("No simulation clients connected")
         _emit_to_display("error", {"message": "No simulation clients connected"})
         return
 
-    if not state_machine.start_test():
+    # Snapshot expected completers BEFORE the transition: the on_change observer
+    # emits start_test the instant we enter TESTING, so the lock must be in place
+    # before any client can report back.
+    client_manager.reset_all()
+    client_manager.lock()
+    if not state_machine.start_test():  # → observer emits start_test + test_started
+        client_manager.unlock()
         logger.warning("Cannot start test in state: %s", state_machine.state.name)
         return
 
-    client_manager.reset_all()
-    client_manager.lock()  # Freeze assignments; snapshot expected completers.
-
-    # Broadcast test config to all sim clients via their room.
-    # Room-based emit is reliable from any thread; SID-targeted emit
-    # can silently fail when called from a non-eventlet OS thread.
-    puzzle = state_machine.current_puzzle
-    toxicity = puzzle.get("toxicity", DEFAULT_TOXICITY) if puzzle else DEFAULT_TOXICITY
-
-    socketio.emit("start_test", {
-        "ligandPositions": state_machine.ligand_positions,
-        "toxicity": toxicity,
-        "puzzle": puzzle,
-        "totalParticles": DEFAULT_PARTICLE_COUNT,
-    }, room="sim_clients")
-
-    _emit_to_display("test_started", {
-        "ligandPositions": state_machine.ligand_positions,
-        "puzzle": puzzle
-    })
     logger.info(
         "Test started with %d client(s) (%d expected completer(s))",
         client_manager.count, client_manager.expected_completer_count,
@@ -391,11 +381,10 @@ def action_restart_test():
 
     if state_machine.state == State.TESTING:
         logger.info("Button pressed mid-test; restarting with current parameters")
-        # Release clients from test mode so they accept the new start_test.
-        client_manager.reset_all()
+        # Drop the lock so action_start_test re-snapshots completers. Stepping
+        # back to PUZZLE_LOADED fires the observer, which emits "reset" to the
+        # sim clients (clearing the previous run) before the new start_test.
         client_manager.unlock()
-        socketio.emit("reset", {}, room="sim_clients")
-        # Step state back to PUZZLE_LOADED, preserving puzzle + ligand config.
         state_machine.restart_test()
         action_start_test()
 
@@ -404,7 +393,7 @@ def action_restart_test():
 
     elif state_machine.state == State.RESULTS:
         # Repeat run with the same puzzle/nanoparticle without re-scanning.
-        if state_machine.transition(State.PUZZLE_LOADED):
+        if state_machine.restart_test():
             action_start_test()
 
     else:
@@ -416,12 +405,9 @@ def action_restart_test():
 
 def action_reset():
     """Reset exhibit to idle state."""
-    state_machine.reset()
     client_manager.reset_all()
     client_manager.unlock()  # Re-enable tissue reassignment for the next test.
-
-    socketio.emit("reset", {}, room="sim_clients")
-    _emit_to_display("state_reset", {})
+    state_machine.reset()    # → observer emits "reset" (sim) + "state_reset" (display)
     logger.info("Exhibit reset to IDLE")
 
 
@@ -459,6 +445,51 @@ def _emit_to_display(event, data):
     socketio.emit(event, data, room="display")
 
 
+def _on_state_change(old, new):
+    """Map each state *entry* to its client/display notifications — the one place.
+
+    Registered as the state machine's on_change listener, so every call to a
+    state_machine.* method automatically emits the right events and the two can't
+    drift apart.  Continuous data streams (sensor `ligand_update`,
+    `results_update`) are intentionally NOT here — they aren't state transitions
+    and stay at their call sites.
+
+    Runs inside transition(), i.e. on the eventlet event loop, so socketio.emit
+    here reliably reaches remote clients.
+    """
+    if new == State.IDLE:
+        socketio.emit("reset", {}, room="sim_clients")
+        _emit_to_display("state_reset", {})
+
+    elif new == State.PUZZLE_LOADED:
+        # A restart steps TESTING → PUZZLE_LOADED; clear the clients' prior run first.
+        if old == State.TESTING:
+            socketio.emit("reset", {}, room="sim_clients")
+        _emit_to_display("puzzle_loaded", {"puzzle": state_machine.current_puzzle})
+
+    elif new == State.TESTING:
+        puzzle = state_machine.current_puzzle
+        toxicity = puzzle.get("toxicity", DEFAULT_TOXICITY) if puzzle else DEFAULT_TOXICITY
+        # Room-based emit is reliable from the event loop; carries the full config
+        # so a client has everything it needs to run without a follow-up round trip.
+        socketio.emit("start_test", {
+            "ligandPositions": state_machine.ligand_positions,
+            "toxicity": toxicity,
+            "puzzle": puzzle,
+            "totalParticles": DEFAULT_PARTICLE_COUNT,
+        }, room="sim_clients")
+        _emit_to_display("test_started", {
+            "ligandPositions": state_machine.ligand_positions,
+            "puzzle": puzzle,
+        })
+
+    elif new == State.RESULTS:
+        _emit_to_display("test_complete", {"finalResults": state_machine.test_results})
+
+
+state_machine.on_change(_on_state_change)
+
+
 def _check_test_done():
     """Evaluate test completion after any client status change.
 
@@ -471,8 +502,7 @@ def _check_test_done():
         return
     if client_manager.all_complete():
         all_results = client_manager.get_aggregated_stats()
-        state_machine.complete_test(all_results)
-        _emit_to_display("test_complete", {"finalResults": all_results})
+        state_machine.complete_test(all_results)  # → observer emits test_complete
         logger.info("Test complete. Final results collected.")
     elif client_manager.no_completers_left():
         logger.warning("All expected completers disconnected; auto-resetting exhibit")

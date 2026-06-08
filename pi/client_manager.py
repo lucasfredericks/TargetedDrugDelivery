@@ -47,6 +47,10 @@ class ClientManager:
     def expected_completer_count(self):
         return len(self._expected_completers)
 
+    def is_expected_completer(self, sid):
+        """True if this client was tracked for completion at test-start."""
+        return sid in self._expected_completers
+
     # ------------------------------------------------------------------
     # Connection management
     # ------------------------------------------------------------------
