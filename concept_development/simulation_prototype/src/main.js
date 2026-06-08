@@ -304,12 +304,11 @@ function setupNetwork() {
         sim.setLigandPositions(data.ligandPositions);
       }
     }
-    // Only rebuild tissue/cells when the puzzle actually changes.  The Pi
-    // re-emits ligand_update on every sensor sweep (~1s) while a tag sits on
-    // the pad; applyPuzzleWithoutLigands → setTissue regenerates every cell,
-    // so re-applying the same puzzle each poll makes the tissues visibly
-    // flicker.  Gate on the puzzle id so a scan rebuilds once, then idles.
-    if (data.puzzle && data.puzzle.id !== puzzle?.id) {
+    // The Pi re-emits ligand_update on every sensor sweep (~1s) while a tag
+    // sits on the pad.  applyPuzzleWithoutLigands → setTissue only rebuilds
+    // cells when the tissue's receptor profile actually changes, so applying
+    // the same puzzle repeatedly here is a cheap no-op (no cell regeneration).
+    if (data.puzzle) {
       applyPuzzleWithoutLigands(data.puzzle);
     }
     sendStats();

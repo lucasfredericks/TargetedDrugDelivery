@@ -43,6 +43,7 @@ class Simulation {
     this.tracers = []; // Lightweight flow-visualization particles
     this.tracerCount = 3000; // Target number of tracer particles
     this.cells = [];
+    this._cellSignature = null; // Receptor/tissue fingerprint of the current cells
     this.buffer = null;
     this.particleSprite = null;
     this.spriteCache = new Map();  // key: ligandPositions.join(','), value: p5.Graphics
@@ -922,13 +923,31 @@ class Simulation {
   }
 
   /**
-   * Update tissue configuration. Always regenerates cells so a fresh, uniform
-   * receptor allocation is guaranteed (the previous comparison-based shortcut
-   * occasionally left cells in a stale state when only one slider was non-zero).
+   * Build a value-based fingerprint of the inputs that affect cell layout.
+   * Uses the receptor *values* (joined), not the array reference, so an
+   * in-place mutation of tissue.receptors (e.g. a dashboard slider) is still
+   * detected — that reference-equality blind spot is why the old skip-guard
+   * left cells stale when only one slider was non-zero.
+   */
+  _tissueSignature(tissue) {
+    const receptors = (tissue.receptors || []).map(r => r || 0).join(',');
+    return `${tissue.name || ''}|${receptors}`;
+  }
+
+  /**
+   * Update tissue configuration. Regenerates cells only when the tissue's
+   * receptor profile actually changes (a new puzzle/RFID). The Pi re-emits
+   * ligand_update on every sensor sweep while a tag is present, so blindly
+   * regenerating here made every cell rebuild continuously. Cells are still
+   * rebuilt fresh on test start and reset, which call generateCells directly.
    */
   setTissue(tissue) {
     this.tissue = tissue;
-    this.generateCells();
+    const sig = this._tissueSignature(tissue);
+    if (sig !== this._cellSignature || this.cells.length === 0) {
+      this._cellSignature = sig;
+      this.generateCells();
+    }
     this.theoreticalScore = this.computeTheoreticalScore();
   }
 
