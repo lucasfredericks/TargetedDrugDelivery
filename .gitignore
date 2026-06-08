@@ -24,3 +24,6 @@ desktop.ini
 *.swp
 *.swo
 .idea/
+
+# Per-deployment sim PC inventory (MACs/IPs/users)
+pi/sim_pcs.json

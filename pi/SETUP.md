@@ -335,11 +335,22 @@ To specify the Arduino serial port manually:
 Step 10: Connect Client Computers
 ----------------------------------
 
-On each client computer, open the simulation in a web browser:
+In the deployed exhibit, each sim PC runs Chrome in kiosk mode pointed
+at a local splash.html that polls the Pi and redirects to the sim once
+the master server answers. This means the PCs can be powered on before
+the Pi is up. See exhibit_pc/SETUP.md for the per-PC Chrome shortcut
+and splash.html install.
 
-    http://192.168.1.1:5000/sim?server=192.168.1.1:5000
+For quick testing without configuring splash, open the simulation
+directly in any browser:
 
-The client will connect via Socket.IO and register with the master.
+    http://192.168.1.1:5000/sim?server=192.168.1.1:5000&tissue=0
+
+The tissue=N param (0-3) renders a single tissue full-screen, which is
+how each exhibit PC launches. Omit it to see all 4 tissues in a 2x2
+grid on one machine.
+
+The client connects via Socket.IO and registers with the master.
 Tissues are assigned automatically based on the number of clients:
 - 1 client: runs all 4 tissues
 - 2 clients: 2 tissues each
@@ -361,7 +372,44 @@ to exit). The display shows:
 - Test progress and status
 
 
-Step 12: Auto-Start on Boot (Optional)
+Step 12: Remote Power Control (Optional)
+-----------------------------------------
+
+The Pi can wake and shut down the sim PCs over the LAN using
+Wake-on-LAN and SSH, so staff can power the entire exhibit on/off from
+the /admin page or a single CLI command. Per-PC configuration (BIOS
+WoL, NIC settings, Windows OpenSSH Server, key install) is in
+exhibit_pc/SETUP.md.
+
+On the Pi side, one-time:
+
+1. Generate an SSH key if you don't already have one:
+
+       ssh-keygen -t ed25519
+
+   Then install the public key (~/.ssh/id_ed25519.pub) on each sim PC
+   as described in exhibit_pc/SETUP.md.
+
+2. Create the sim PC inventory file:
+
+       cd pi/
+       cp sim_pcs.example.json sim_pcs.json
+       nano sim_pcs.json    # fill in mac, host, ssh_user for each PC
+
+   sim_pcs.json is gitignored — each deployment maintains its own copy.
+
+3. Verify:
+
+       python control_sims.py list
+       python control_sims.py on --pc sim1     # wake one PC
+       python control_sims.py off --pc sim1    # shut down one PC
+       python control_sims.py on               # wake all
+       python control_sims.py off              # shut down all
+
+Once the CLI works, the "Wake All Sim PCs" / "Shut Down All Sim PCs"
+buttons on http://<pi-ip>:5000/admin invoke the same code over HTTP.
+
+Step 13: Auto-Start on Boot (Optional)
 ----------------------------------------
 
 Create a systemd service to start the master server automatically:
@@ -399,6 +447,96 @@ To also auto-start the display in Chromium, add to
     Name=TDD Display
     Exec=chromium --kiosk http://localhost:5000/
     X-GNOME-Autostart-enabled=true
+
+
+Step 14: Enable Read-Only Overlay File System (Optional)
+---------------------------------------------------------
+
+The exhibit will be powered off at the breaker, so the Pi gets cut from
+power abruptly every night. Repeated unclean shutdowns can corrupt the
+SD card filesystem over time. Raspberry Pi OS includes an overlay file
+system mode that makes the root filesystem read-only and redirects all
+writes to RAM, eliminating this risk entirely.
+
+Do this LAST, after everything else is set up and verified working.
+
+### What gets lost on reboot once overlay is enabled
+
+Under the overlay, anything written to disk at runtime is discarded on
+reboot. Two files this exhibit writes are important:
+
+- puzzles/index.json — tag-to-puzzle mappings edited via /admin
+- color_map.json — color sensor calibration
+
+Edits to either file will be lost on the next power cycle UNLESS you
+temporarily disable the overlay first (see workflow below). Logs, SSH
+known_hosts entries created at runtime, and DHCP leases are also lost,
+but these don't affect operation.
+
+### Before enabling overlay — pre-populate SSH known_hosts
+
+If you're using the remote power control feature (Step 12), SSH to each
+sim PC once from the Pi to accept its host key, so the entry is baked
+into the read-only image:
+
+    ssh tdd@sim1 exit
+    ssh tdd@sim2 exit
+    # ...etc for each PC in sim_pcs.json
+
+### Enable the overlay
+
+    sudo raspi-config
+
+Navigate to Performance Options -> Overlay File System -> Enable.
+Also choose to make the boot partition read-only when prompted.
+
+Reboot. Verify overlay is active:
+
+    findmnt /
+    # Should show: overlay on / type overlay
+
+### Workflow when you need to change tag mappings or recalibrate
+
+This should be rare once the exhibit is deployed. To make persistent
+changes:
+
+1. Disable the overlay:
+
+       sudo raspi-config
+       # Performance Options -> Overlay File System -> Disable
+
+2. Reboot:
+
+       sudo reboot
+
+3. Make your changes:
+   - Tag mappings: open http://<pi-ip>:5000/admin and edit normally
+   - Recalibration: `cd pi && python color_calibration.py`
+   - Any other persistent edits (config tweaks, software updates, etc.)
+
+4. Re-enable the overlay:
+
+       sudo raspi-config
+       # Performance Options -> Overlay File System -> Enable
+
+5. Reboot:
+
+       sudo reboot
+
+6. Verify your changes survived by checking the admin page or running
+   `cat pi/color_map.json` — they should still be there since writes
+   landed on the real disk while the overlay was off.
+
+### Headless shortcut
+
+The same toggle is available non-interactively:
+
+    sudo raspi-config nonint do_overlayfs 0    # enable overlay
+    sudo raspi-config nonint do_overlayfs 1    # disable overlay
+    sudo reboot
+
+(Note the inverted convention: 0 = enabled, 1 = disabled, matching the
+raspi-config menu's "0 = on" pattern.)
 
 
 Troubleshooting

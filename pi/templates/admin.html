@@ -240,6 +240,19 @@
         </span>
     </div>
 
+    <!-- Sim PC Power Control -->
+    <div class="card" style="margin-bottom: 16px;">
+        <h2>Sim PCs — Power Control</h2>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+            <button class="btn btn-primary" id="wake-sims-btn">Wake All Sim PCs</button>
+            <button class="btn btn-danger" id="shutdown-sims-btn"
+                    style="padding: 10px 24px; font-size: 0.95em;">
+                Shut Down All Sim PCs
+            </button>
+        </div>
+        <div id="power-results" style="font-size: 0.85em; color: #888; font-family: monospace;"></div>
+    </div>
+
     <!-- Current Mappings -->
     <div class="card">
         <h2>Current Mappings</h2>
@@ -412,6 +425,63 @@
         el.textContent = msg;
         document.body.appendChild(el);
         setTimeout(() => el && el.remove(), 3500);
+    }
+
+    // --- Power control ---
+
+    document.getElementById("wake-sims-btn").addEventListener("click", async () => {
+        const btn = document.getElementById("wake-sims-btn");
+        btn.disabled = true;
+        const prev = btn.textContent;
+        btn.textContent = "Sending wake packets...";
+        try {
+            const res = await fetch("/admin/api/sims/wake", {method: "POST"});
+            renderPowerResults(await res.json());
+        } catch (e) {
+            renderPowerResults({ok: false, error: String(e)});
+        }
+        btn.textContent = prev;
+        btn.disabled = false;
+    });
+
+    document.getElementById("shutdown-sims-btn").addEventListener("click", async () => {
+        if (!confirm("Shut down all sim PCs? Any active session will end.")) return;
+        const btn = document.getElementById("shutdown-sims-btn");
+        btn.disabled = true;
+        const prev = btn.textContent;
+        btn.textContent = "Shutting down...";
+        try {
+            const res = await fetch("/admin/api/sims/shutdown", {method: "POST"});
+            renderPowerResults(await res.json());
+        } catch (e) {
+            renderPowerResults({ok: false, error: String(e)});
+        }
+        btn.textContent = prev;
+        btn.disabled = false;
+    });
+
+    function renderPowerResults(data) {
+        const el = document.getElementById("power-results");
+        if (!data.ok) {
+            el.innerHTML = `<span style="color:#f66;">${escapeHtml(data.error || "unknown error")}</span>`;
+            return;
+        }
+        if (!data.results || data.results.length === 0) {
+            el.innerHTML = '<span style="color:#888;">No sim PCs configured (pi/sim_pcs.json).</span>';
+            return;
+        }
+        el.innerHTML = data.results.map(r => {
+            const tag = r.ok
+                ? '<span style="color:#6f6;">[OK]</span>'
+                : '<span style="color:#f66;">[FAIL]</span>';
+            return `<div>${tag} ${escapeHtml(r.name)} — ${escapeHtml(r.message)}</div>`;
+        }).join("");
+    }
+
+    function escapeHtml(s) {
+        const div = document.createElement("div");
+        div.textContent = String(s);
+        return div.innerHTML;
     }
 
     // --- Init ---

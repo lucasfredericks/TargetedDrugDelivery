@@ -1,0 +1,6 @@
+{
+  "sim1": {"mac": "AA:BB:CC:11:22:01", "host": "192.168.1.101", "ssh_user": "tdd"},
+  "sim2": {"mac": "AA:BB:CC:11:22:02", "host": "192.168.1.102", "ssh_user": "tdd"},
+  "sim3": {"mac": "AA:BB:CC:11:22:03", "host": "192.168.1.103", "ssh_user": "tdd"},
+  "sim4": {"mac": "AA:BB:CC:11:22:04", "host": "192.168.1.104", "ssh_user": "tdd"}
+}

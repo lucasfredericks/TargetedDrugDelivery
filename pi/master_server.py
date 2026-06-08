@@ -133,6 +133,36 @@ def admin_save_tag():
     return jsonify({"ok": True})
 
 
+@app.route("/admin/api/sims/wake", methods=["POST"])
+def admin_wake_sims():
+    """Send Wake-on-LAN magic packets to all configured sim PCs."""
+    try:
+        from control_sims import wake_all
+        return jsonify({"ok": True, "results": wake_all()})
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("wake_all failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/admin/api/sims/shutdown", methods=["POST"])
+def admin_shutdown_sims():
+    """SSH into each sim PC and trigger shutdown."""
+    try:
+        from control_sims import shutdown_all
+        from eventlet import tpool
+        # Each SSH can take up to ~15s and subprocess.run blocks; route through
+        # tpool so we don't stall the eventlet loop or starve other clients.
+        results = tpool.execute(shutdown_all)
+        return jsonify({"ok": True, "results": results})
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("shutdown_all failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/admin/api/tags/<path:uid>", methods=["DELETE"])
 def admin_delete_tag(uid):
     """Remove a tag mapping by UID."""

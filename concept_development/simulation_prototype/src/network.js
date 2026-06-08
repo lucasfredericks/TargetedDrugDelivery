@@ -12,6 +12,12 @@
  *   // network.sendStats(stats), network.sendTestComplete(finalStats)
  */
 
+// Time the simulation will tolerate being disconnected from the Pi before
+// it abandons the page and navigates back to the splash (or reloads).
+// Long enough to ride out a normal reconnect; short enough that a wedged
+// Pi or a Pi reboot recovers within ~1 minute of it coming back.
+const DISCONNECT_RELOAD_MS = 60000;
+
 // eslint-disable-next-line no-unused-vars
 class NetworkClient {
   constructor() {
@@ -20,6 +26,7 @@ class NetworkClient {
     this.broadcastChannel = null;
     this.serverUrl = null;
     this.assignedTissues = null; // Tissue indices assigned by master
+    this._reloadTimer = null;
 
     // Callbacks
     this._onStartTest = null;
@@ -54,6 +61,7 @@ class NetworkClient {
     });
 
     this.socket.on("connect", () => {
+      this._cancelReload();
       console.log("Network: connected to master server");
       this.socket.emit("register_client", {
         userAgent: navigator.userAgent,
@@ -64,6 +72,7 @@ class NetworkClient {
 
     this.socket.on("disconnect", () => {
       console.log("Network: disconnected from master server");
+      this._scheduleReload();
     });
 
     this.socket.on("assignment", (data) => {
@@ -161,5 +170,28 @@ class NetworkClient {
   /** Check if operating in exhibit (Socket.IO) mode. */
   get isExhibitMode() {
     return this.mode === "socketio";
+  }
+
+  // --- Disconnect recovery ---
+
+  _scheduleReload() {
+    if (this._reloadTimer) return;
+    this._reloadTimer = setTimeout(() => {
+      const splash = getQueryParam("_splash");
+      if (splash) {
+        console.warn("Network: disconnect persisted, returning to splash");
+        window.location.replace(splash);
+      } else {
+        console.warn("Network: disconnect persisted, reloading page");
+        window.location.reload();
+      }
+    }, DISCONNECT_RELOAD_MS);
+  }
+
+  _cancelReload() {
+    if (this._reloadTimer) {
+      clearTimeout(this._reloadTimer);
+      this._reloadTimer = null;
+    }
   }
 }

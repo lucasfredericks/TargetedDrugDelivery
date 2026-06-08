@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Targeted Drug Delivery — Waiting for Server</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; color: #888;
+               font-family: system-ui, sans-serif; }
+  .wrap { position: absolute; inset: 0; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 1.2em; text-align: center; }
+  .status { font-size: 1.3em; }
+  .dots::after { content: "..."; display: inline-block; width: 1.5em; text-align: left;
+                 animation: blink 1.4s infinite steps(4); }
+  @keyframes blink {
+    0%   { content: ""; }
+    25%  { content: "."; }
+    50%  { content: ".."; }
+    75%  { content: "..."; }
+    100% { content: ""; }
+  }
+  .meta { font-size: 0.9em; opacity: 0.5; }
+  .error { color: #d66; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="status" id="status">Waiting for master server<span class="dots"></span></div>
+  <div class="meta" id="meta"></div>
+</div>
+<script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const server = params.get("server");
+  const statusEl = document.getElementById("status");
+  const metaEl = document.getElementById("meta");
+
+  if (!server) {
+    statusEl.textContent = "Error: missing ?server=<host:port> in URL";
+    statusEl.classList.add("error");
+    return;
+  }
+
+  metaEl.textContent = server;
+
+  // Forward all incoming query params to the sim, plus a _splash marker so the
+  // sim can navigate back here if the connection drops for too long.
+  params.set("_splash", window.location.href);
+  const target = "http://" + server + "/sim/index.html?" + params.toString();
+  const probe = "http://" + server + "/status";
+
+  let attempts = 0;
+
+  async function check() {
+    attempts++;
+    try {
+      // no-cors so we don't need CORS headers on /status; an opaque resolution
+      // is enough to confirm the server is reachable.
+      await fetch(probe + "?_=" + Date.now(), { mode: "no-cors", cache: "no-store" });
+      statusEl.textContent = "Connected, loading simulation...";
+      window.location.replace(target);
+    } catch (e) {
+      metaEl.textContent = server + "  ·  attempt " + attempts;
+    }
+  }
+
+  check();
+  setInterval(check, 1000);
+})();
+</script>
+</body>
+</html>
