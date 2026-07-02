@@ -16,10 +16,15 @@
 class NetworkClient {
   constructor() {
     this.mode = null; // "socketio" or "broadcast"
-    this.socket = null;
+    this.socket = null; // in-thread Socket.IO (fallback path only)
+    this.worker = null; // Web Worker owning the Socket.IO connection (primary path)
     this.broadcastChannel = null;
     this.serverUrl = null;
     this.assignedTissues = null; // Tissue indices assigned by master
+
+    // Worker-path state
+    this._workerReady = false; // true once the worker reports a live connection
+    this._fellBack = false;    // true once we've given up on the worker
 
     // Callbacks
     this._onStartTest = null;
@@ -46,6 +51,90 @@ class NetworkClient {
       ? this.serverUrl
       : `http://${this.serverUrl}`;
 
+    // Prefer running the Socket.IO connection in a Web Worker so the heartbeat
+    // survives a saturated main thread (see network.worker.js). Fall back to an
+    // in-thread connection if the environment can't spawn the worker.
+    if (typeof Worker !== "undefined") {
+      try {
+        this._initSocketIOWorker(url);
+        return;
+      } catch (e) {
+        console.warn("Network: could not start socket worker; using in-thread socket", e);
+        this.worker = null;
+      }
+    }
+    this._initSocketIOInline(url);
+  }
+
+  /** Primary path: the socket lives on a dedicated worker thread. */
+  _initSocketIOWorker(url) {
+    const worker = new Worker("src/network.worker.js");
+    this.worker = worker;
+    this._workerReady = false;
+    this._fellBack = false;
+
+    const fallback = (why) => {
+      if (this._fellBack) return;
+      this._fellBack = true;
+      console.warn("Network: socket worker unavailable; using in-thread socket:", why);
+      try { worker.terminate(); } catch (e) { /* ignore */ }
+      this.worker = null;
+      this._initSocketIOInline(url);
+    };
+
+    // A worker error before we ever connected means the worker path is broken,
+    // so fall back. After a successful connect we keep the worker; its own
+    // Socket.IO client handles reconnects.
+    worker.onerror = (e) => {
+      if (!this._workerReady) fallback(e.message || "worker error");
+    };
+
+    worker.onmessage = (ev) => {
+      const msg = ev.data || {};
+      switch (msg.type) {
+        case "fatal":
+          fallback(msg.error || "worker fatal");
+          break;
+        case "connect":
+          this._workerReady = true;
+          console.log("Network: connected to master server (worker)");
+          break;
+        case "disconnect":
+          console.log("Network: disconnected from master server (worker)");
+          break;
+        case "assignment":
+          this.assignedTissues = msg.data && msg.data.tissueIndices;
+          console.log("Network: assigned tissues", this.assignedTissues);
+          if (this._onAssignment) this._onAssignment(this.assignedTissues);
+          break;
+        case "start_test":
+          console.log("Network: start_test received", msg.data);
+          if (this._onStartTest) this._onStartTest(msg.data);
+          break;
+        case "reset":
+          console.log("Network: reset received");
+          if (this._onReset) this._onReset();
+          break;
+        case "ligand_update":
+          if (this._onLigandUpdate) this._onLigandUpdate(msg.data);
+          break;
+      }
+    };
+
+    worker.postMessage({
+      type: "init",
+      url: url,
+      register: {
+        userAgent: navigator.userAgent,
+        singleTissueMode: singleTissueMode,
+        singleTissueIndex: singleTissueIndex,
+      },
+    });
+    console.log("Network: connecting to master server via worker at", url);
+  }
+
+  /** Fallback path: the socket runs in-thread (original behavior). */
+  _initSocketIOInline(url) {
     console.log("Network: connecting to master server at", url);
     this.socket = io(url, {
       reconnection: true,
@@ -143,8 +232,12 @@ class NetworkClient {
 
   /** Send periodic stats to master or dashboard. */
   sendStats(stats) {
-    if (this.mode === "socketio" && this.socket?.connected) {
-      this.socket.emit("stats_update", { stats: stats });
+    if (this.mode === "socketio") {
+      if (this.worker) {
+        this.worker.postMessage({ type: "stats", stats: stats });
+      } else if (this.socket?.connected) {
+        this.socket.emit("stats_update", { stats: stats });
+      }
     } else if (this.mode === "broadcast" && this.broadcastChannel) {
       this.broadcastChannel.postMessage({ type: "stats", stats: stats });
     }
@@ -152,8 +245,12 @@ class NetworkClient {
 
   /** Notify master that this client's test is complete. */
   sendTestComplete(finalStats) {
-    if (this.mode === "socketio" && this.socket?.connected) {
-      this.socket.emit("test_complete", { finalStats: finalStats });
+    if (this.mode === "socketio") {
+      if (this.worker) {
+        this.worker.postMessage({ type: "test_complete", finalStats: finalStats });
+      } else if (this.socket?.connected) {
+        this.socket.emit("test_complete", { finalStats: finalStats });
+      }
     }
     // No equivalent in BroadcastChannel mode
   }

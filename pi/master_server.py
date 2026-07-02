@@ -35,7 +35,18 @@ logger = logging.getLogger(__name__)
 # Flask + Socket.IO app
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "tdd-exhibit"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+# ping_timeout is generous because sim clients run a CPU-heavy p5.js draw loop
+# that can block the browser main thread at peak particle load. With the default
+# 20s timeout, that jank was read as a disconnect, dropping every client at once
+# mid-test and tripping the "all clients lost" auto-reset. 60s tolerates the
+# stall; the client still reconnects quickly if it truly drops.
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet",
+    ping_interval=25,
+    ping_timeout=60,
+)
 
 # Core services
 state_machine = ExhibitStateMachine()

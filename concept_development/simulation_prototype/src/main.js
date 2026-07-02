@@ -44,6 +44,9 @@ function setup() {
   // Setup network (Socket.IO if ?server= param, else BroadcastChannel)
   setupNetwork();
 
+  // Kiosk longevity: reset accumulated main-thread heap/GC pressure nightly.
+  scheduleNightlyReload();
+
   // Load puzzle and create simulations
   fetch('puzzle_example.json')
     .then(r => r.json())
@@ -64,6 +67,30 @@ function setup() {
       puzzle = createDefaultPuzzle();
       createSimulations();
     });
+}
+
+// Schedule a single page reload during the small hours. The p5 draw loop runs
+// continuously, so heap/GC pressure grows over days of uptime and eventually
+// degrades main-thread responsiveness. A daily reload resets that memory. Fires
+// once, then setup() reschedules on the fresh load; it defers if a test is
+// running so a late-night visitor is never interrupted.
+function scheduleNightlyReload() {
+  const RELOAD_HOUR = 4; // 4 AM local time
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RELOAD_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+
+  setTimeout(() => {
+    const inTest = simulations.some(sim => sim.getTestStatus().testMode);
+    if (inTest) {
+      // Unlikely at this hour; retry shortly rather than interrupt a visitor.
+      setTimeout(() => location.reload(), 5 * 60 * 1000);
+    } else {
+      console.log("Nightly reload for kiosk longevity");
+      location.reload();
+    }
+  }, next - now);
 }
 
 function createDefaultPuzzle() {
