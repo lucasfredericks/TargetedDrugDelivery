@@ -335,15 +335,26 @@ To specify the Arduino serial port manually:
 Step 10: Connect Client Computers
 ----------------------------------
 
-On each client computer, open the simulation in a web browser:
+Each simulation PC runs no local simulation code — it is a browser pointed at
+the Pi, which serves the simulation and coordinates over Socket.IO. See
+simulation_pc/SETUP.md for the full per-PC procedure (a small local launcher.html
+handles boot ordering so the PCs and Pi can start in any order).
 
-    http://192.168.1.1:5000/sim?server=192.168.1.1:5000
+A working exhibit URL needs BOTH params:
 
-The client will connect via Socket.IO and register with the master.
-Tissues are assigned automatically based on the number of clients:
-- 1 client: runs all 4 tissues
-- 2 clients: 2 tissues each
-- 4 clients: 1 tissue each
+    http://192.168.1.1:5000/sim/?server=192.168.1.1:5000&tissue=0
+
+  - server=  puts the client in Socket.IO (exhibit) mode. Without it the sim
+             falls back to local BroadcastChannel dev mode and never connects.
+  - tissue=  assigns which single tissue (0-3) this screen renders. Omit it and
+             the screen renders all 4 tissues.
+
+To sanity-check one client by hand, you can open that URL directly in a browser.
+In the exhibit, the launcher builds this URL for you.
+
+The client connects via Socket.IO and registers with the master. Assign one
+tissue per screen with tissue=0..3; a single client with no tissue= param runs
+all 4 tissues (useful for a one-machine test).
 
 
 Step 11: Open the Results Display

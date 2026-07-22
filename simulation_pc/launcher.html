@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TDD Simulation — Launcher</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #000; color: #cfd8dc;
+      font-family: system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+    .wrap { height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; gap: 1.2rem; }
+    .spinner { width: 46px; height: 46px; border: 4px solid #263238;
+      border-top-color: #4fc3f7; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .title { font-size: 1.15rem; font-weight: 600; color: #eceff1; }
+    .detail { font-size: 0.85rem; color: #78909c; }
+    .tissue { font-size: 0.8rem; color: #546e7a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="spinner"></div>
+    <div class="title">Waiting for exhibit server…</div>
+    <div class="detail" id="detail"></div>
+    <div class="tissue" id="tissue"></div>
+  </div>
+
+  <!--
+    Cold-boot launcher for a simulation PC.
+
+    Purpose: the simulation itself is served from the Raspberry Pi (single source
+    of truth — a repo change needs one `git pull` on the Pi, none on the PCs).
+    The only thing the Pi can't fix by itself is boot ordering: if this PC's
+    browser opens before the Pi's HTTP server is up, it would land on an error
+    page and never retry. This page fills that gap and nothing else — it polls
+    the Pi and, once reachable, hands off to the Pi-served simulation.
+
+    This file is IDENTICAL on every simulation PC and does NOT change when the
+    simulation changes. Per-PC configuration lives entirely in the kiosk URL:
+
+      chromium --kiosk "file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"
+
+    Query params (all optional except in practice you always set pi + tissue):
+      pi       Pi host:port                 (default 192.168.1.1:5000)
+      tissue   tissue index 0-3 this PC runs (default: omitted → runs all 4)
+      fluid    "true" to enable fluid sim    (passed through unchanged)
+      poll     poll interval in ms           (default 2000)
+  -->
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var pi = q.get("pi") || "192.168.1.1:5000";
+      var tissue = q.get("tissue");
+      var pollMs = parseInt(q.get("poll"), 10) || 2000;
+
+      // Build the Pi-served simulation URL. ?server= is what puts network.js in
+      // Socket.IO (exhibit) mode; ?tissue= assigns which tissue this PC renders.
+      var sim = "http://" + pi + "/sim/?server=" + encodeURIComponent(pi);
+      if (tissue !== null && tissue !== "") sim += "&tissue=" + encodeURIComponent(tissue);
+      if (q.get("fluid")) sim += "&fluid=" + encodeURIComponent(q.get("fluid"));
+
+      document.getElementById("detail").textContent = "Trying " + pi;
+      document.getElementById("tissue").textContent =
+        (tissue !== null && tissue !== "") ? ("This screen: tissue " + tissue) : "This screen: all tissues";
+
+      var attempts = 0;
+
+      function go() { location.replace(sim); }
+
+      // Reachability probe. A <script> load isn't CORS-restricted and works from
+      // a file:// origin (unlike fetch on some Chromium builds), and unlike an
+      // <img> it's unambiguous: onload fires only when the Pi actually served
+      // and executed the file, while onerror/timeout means it's still down. We
+      // point it at a static asset the Pi always serves (the sim's Socket.IO
+      // lib, which harmlessly just defines `io`). Cache-busting keeps each
+      // attempt a fresh request.
+      function probe() {
+        attempts++;
+        document.getElementById("detail").textContent =
+          "Waiting for " + pi + " … (attempt " + attempts + ")";
+
+        var s = document.createElement("script");
+        var settled = false;
+        function retry() {
+          if (settled) return;
+          settled = true;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          setTimeout(probe, pollMs);
+        }
+        var timer = setTimeout(retry, pollMs);   // no response → server down
+        s.onload = function () {                  // Pi served + ran the file → up
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          go();
+        };
+        s.onerror = retry;                        // connection refused → still down
+        s.src = "http://" + pi + "/sim/lib/socket.io.min.js?probe=" + Date.now();
+        document.head.appendChild(s);
+      }
+
+      probe();
+    })();
+  </script>
+</body>
+</html>
