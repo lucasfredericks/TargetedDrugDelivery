@@ -80,10 +80,10 @@ between machines:
 Replace `192.168.1.1` with the Pi's static IP (see [pi/SETUP.md](../pi/SETUP.md)
 Step 8).
 
-Chromium example (a Startup shortcut or Task Scheduler entry on boot):
+ungoogled-chromium example (a Startup shortcut or Task Scheduler entry on boot):
 
 ```
-chrome.exe --kiosk "file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"
+"C:\exhibit\ungoogled-chromium\chrome.exe" --kiosk "file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"
 ```
 
 The launcher shows a "Waiting for exhibit server…" screen, polls the Pi every
@@ -98,20 +98,32 @@ them).
 
 ---
 
-## Auto-start Chromium in kiosk at boot
+## Auto-start ungoogled-chromium in kiosk at boot
 
 Pick **one** of these so each PC opens straight into its screen on power-up. In
 both cases only the `tissue=` value changes between the four PCs.
 
-### Prerequisite: disable Chrome's crash-restore bubble
+### Prerequisite: install ungoogled-chromium
 
-After an unclean shutdown Chrome shows a "restore pages?" bar that steals kiosk
+Grab a Windows build from the
+[ungoogled-chromium releases](https://github.com/ungoogled-software/ungoogled-chromium-windows/releases)
+— either the installer or the portable `.zip`. For a predictable kiosk path,
+unpack the portable build to `C:\exhibit\ungoogled-chromium\` so the executable
+is `C:\exhibit\ungoogled-chromium\chrome.exe` (the binary keeps the `chrome.exe`
+name). If you use the installer instead, adjust the path in the commands below to
+wherever it lands (typically
+`C:\Program Files\Chromium\Application\chrome.exe`).
+
+**Heads up:** ungoogled-chromium does **not** auto-update. Note it somewhere and
+drop in a fresh build periodically — low urgency here since these PCs only ever
+talk to the Pi on the LAN, never the open web.
+
+### Prerequisite: disable the crash-restore bubble
+
+After an unclean shutdown Chromium shows a "restore pages?" bar that steals kiosk
 focus. Launch a **dedicated profile** and mark it clean-exit so the bar never
-appears. The commands below use `--user-data-dir=C:\exhibit\chrome-profile` for
-that; create the folder once (`mkdir C:\exhibit\chrome-profile`).
-
-Adjust the Chrome path if needed:
-`C:\Program Files\Google\Chrome\Application\chrome.exe`.
+appears. The commands below use `--user-data-dir=C:\exhibit\chromium-profile` for
+that; create the folder once (`mkdir C:\exhibit\chromium-profile`).
 
 ### Option A: Startup-folder shortcut (simplest)
 
@@ -121,7 +133,7 @@ Adjust the Chrome path if needed:
    shown — change `tissue=0` per machine):
 
    ```
-   "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --user-data-dir=C:\exhibit\chrome-profile --no-first-run --disable-session-crashed-bubble --disable-infobars "file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"
+   "C:\exhibit\ungoogled-chromium\chrome.exe" --kiosk --user-data-dir=C:\exhibit\chromium-profile --no-first-run --disable-session-crashed-bubble --disable-infobars "file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"
    ```
 
 3. Name it `TDD Sim` and finish. Set the PC to log in automatically (see below)
@@ -135,12 +147,12 @@ Survives across users and lets you add a startup delay if the machine is slow to
 bring up networking. Run in an **admin** PowerShell (change `tissue=0` per PC):
 
 ```powershell
-$chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$args = '--kiosk --user-data-dir=C:\exhibit\chrome-profile --no-first-run ' +
+$browser = "C:\exhibit\ungoogled-chromium\chrome.exe"
+$args = '--kiosk --user-data-dir=C:\exhibit\chromium-profile --no-first-run ' +
         '--disable-session-crashed-bubble --disable-infobars ' +
         '"file:///C:/exhibit/launcher.html?pi=192.168.1.1:5000&tissue=0"'
 
-$action  = New-ScheduledTaskAction -Execute $chrome -Argument $args
+$action  = New-ScheduledTaskAction -Execute $browser -Argument $args
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $trigger.Delay = "PT10S"   # optional: wait 10s after logon for the network
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
@@ -161,7 +173,7 @@ is only about the PC itself finishing boot — it isn't required for correctness
 - **Exit kiosk** for maintenance: `Alt+F4`, or `Ctrl+W`. To keep staff from
   wandering off, you can also lock the machine to this one task with Windows
   **Assigned Access** (Settings → Accounts → Family & other users → Set up a
-  kiosk), pointing it at the same Chrome command.
+  kiosk), pointing it at the same ungoogled-chromium command.
 
 ---
 
