@@ -14,10 +14,13 @@ NUM_SENSORS = 6
 
 # APDS-9960 color sensing settings
 # color_gain: 0=1x, 1=4x, 2=16x, 3=64x
-COLOR_GAIN = 2  # 16x (was 4x; compensates for the shorter integration below)
+COLOR_GAIN = 1  # 4x
 # color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
-# 16 cycles (~44ms) keeps the color engine responsive; the higher gain above
-# restores the signal amplitude lost by integrating for less time.
+# 16 cycles (~44ms) keeps the color engine responsive. Do NOT raise the gain to
+# "compensate" for the short integration: the ADC full-scale ceiling scales with
+# integration time, so the fill fraction depends on gain alone. At 16x the clear
+# channel saturated (railed at ~16384), flattening brightness and hue. 4x keeps
+# clear comfortably below full-scale at this integration time.
 # NOTE: changing gain or integration time changes the raw R/G/B/C scale, so
 # color_map.json MUST be regenerated (run color_calibration.py) after editing these.
 COLOR_INTEGRATION_TIME = 16
