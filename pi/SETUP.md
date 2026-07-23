@@ -362,7 +362,13 @@ Step 11: Open the Results Display
 
 On the Pi itself, open Chromium to the display page:
 
-    chromium-browser --kiosk http://localhost:5000/
+    chromium-browser --kiosk http://127.0.0.1:5000/
+
+Use 127.0.0.1, not localhost: the master server binds IPv4 only (0.0.0.0),
+but on Raspberry Pi OS "localhost" resolves to IPv6 (::1) first. The page
+would load over the IPv4 fallback while the persistent Socket.IO stream —
+the live sensor readings — silently failed to connect. 127.0.0.1 forces
+IPv4 loopback and avoids the ambiguity.
 
 The --kiosk flag makes it full-screen with no browser UI (press Alt+F4
 to exit). The display shows:
@@ -408,7 +414,7 @@ To also auto-start the display in Chromium, add to
     Version=1.0
     Type=Application
     Name=TDD Display
-    Exec=chromium --kiosk http://localhost:5000/
+    Exec=chromium --kiosk http://127.0.0.1:5000/
     X-GNOME-Autostart-enabled=true
 
 

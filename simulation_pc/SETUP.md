@@ -202,4 +202,4 @@ is only about the PC itself finishing boot — it isn't required for correctness
 - **More than 4 tissues:** the exhibit assumes a 4-tissue puzzle layout. Extend
   the tissue indices and add screens accordingly.
 - **Display:** the results display is not a sim PC — it runs on the Pi's own HDMI
-  output at `http://localhost:5000/` (see [pi/SETUP.md](../pi/SETUP.md) Step 11).
+  output at `http://127.0.0.1:5000/` (see [pi/SETUP.md](../pi/SETUP.md) Step 11).
