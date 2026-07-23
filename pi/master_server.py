@@ -587,11 +587,11 @@ def _sensor_poll_loop():
     in the greenlet context where it works reliably.
     """
     from eventlet import tpool
-    from config import NUM_SENSORS, COLOR_NONE
+    from config import NUM_SENSORS, COLOR_NONE, SENSOR_POLL_INTERVAL_SECONDS
     empty_positions = [COLOR_NONE] * NUM_SENSORS
     empty_colors = ["None"] * NUM_SENSORS
     while True:
-        socketio.sleep(1)
+        socketio.sleep(SENSOR_POLL_INTERVAL_SECONDS)
         svc = sensor_service
         if svc is None:
             break

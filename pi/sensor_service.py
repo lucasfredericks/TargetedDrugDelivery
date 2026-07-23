@@ -8,6 +8,7 @@ not via proximity, since some ligand materials are IR-absorptive.
 
 import json
 import math
+import time
 import logging
 
 import board
@@ -17,7 +18,7 @@ from adafruit_apds9960.apds9960 import APDS9960
 
 from config import (
     MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH, COLOR_NONE,
-    COLOR_GAIN, COLOR_INTEGRATION_TIME
+    COLOR_GAIN, COLOR_INTEGRATION_TIME, COLOR_READ_TIMEOUT
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class SensorService:
         self.sensor_color_maps = {}  # {channel: {color_name: (r, g, b, sc)}}
         self.proximity_thresholds = {}  # {channel: int}
         self.clear_max = {}  # {channel: int} for scaling raw clear to 0-1000
+        self._proximity_enabled = set()  # channels with the proximity engine turned on
 
     def initialize(self):
         """Set up I2C bus, multiplexer, and all 6 sensors."""
@@ -48,7 +50,10 @@ class SensorService:
                 sensor.color_gain = COLOR_GAIN
                 sensor.color_integration_time = COLOR_INTEGRATION_TIME
                 sensor.enable_color = True
-                sensor.enable_proximity = True
+                # Proximity is intentionally left off: color matching never uses
+                # it, and the shared ADC would spend extra time on proximity
+                # pulses every cycle, slowing the color reads. It is enabled
+                # lazily by read_proximity() for the debug/test path only.
                 self.sensors.append(sensor)
                 logger.info("Initialized APDS-9960 on mux channel %d", channel)
             except Exception as e:
@@ -94,7 +99,17 @@ class SensorService:
             return None
 
         try:
-            r, g, b, c = self.sensors[channel].color_data
+            sensor = self.sensors[channel]
+            # Wait for a completed integration so we never return a partial or
+            # stale conversion (e.g. on the first read after init). Normally the
+            # ADC free-runs and data is already valid, so this returns at once;
+            # the timeout just bounds the worst case.
+            deadline = time.monotonic() + COLOR_READ_TIMEOUT
+            while not sensor.color_data_ready:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.002)
+            r, g, b, c = sensor.color_data
             return (r, g, b, c)
         except Exception as e:
             logger.error("Error reading sensor channel %d: %s", channel, e)
@@ -109,7 +124,12 @@ class SensorService:
             return None
 
         try:
-            return self.sensors[channel].proximity
+            sensor = self.sensors[channel]
+            # Proximity is off by default (see initialize); enable it on first use.
+            if channel not in self._proximity_enabled:
+                sensor.enable_proximity = True
+                self._proximity_enabled.add(channel)
+            return sensor.proximity
         except Exception as e:
             logger.error("Error reading proximity channel %d: %s", channel, e)
             return None

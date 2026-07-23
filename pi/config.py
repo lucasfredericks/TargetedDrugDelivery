@@ -14,9 +14,18 @@ NUM_SENSORS = 6
 
 # APDS-9960 color sensing settings
 # color_gain: 0=1x, 1=4x, 2=16x, 3=64x
-COLOR_GAIN = 1  # 4x
+COLOR_GAIN = 2  # 16x (was 4x; compensates for the shorter integration below)
 # color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
-COLOR_INTEGRATION_TIME = 64
+# 16 cycles (~44ms) keeps the color engine responsive; the higher gain above
+# restores the signal amplitude lost by integrating for less time.
+# NOTE: changing gain or integration time changes the raw R/G/B/C scale, so
+# color_map.json MUST be regenerated (run color_calibration.py) after editing these.
+COLOR_INTEGRATION_TIME = 16
+# Max seconds to wait for a completed integration before reading color data.
+COLOR_READ_TIMEOUT = 0.1
+# How often the master polls all sensors and pushes to the display (seconds).
+# Reads are cheap, so a short interval keeps input latency low.
+SENSOR_POLL_INTERVAL_SECONDS = 0.3
 
 # Ligand color names matching the simulation's color indices (0-5)
 LIGAND_COLORS = ["Red", "Blue", "Green", "Purple", "Orange", "Yellow"]
