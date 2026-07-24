@@ -59,6 +59,19 @@ STATS_INTERVAL_MS = 800
 # Covers: stalled sim clients, all clients disconnecting mid-test, runaway tests.
 TEST_TIMEOUT_SECONDS = 120
 
+# How long a screen that drops mid-test may take to come back before the server
+# gives up on it. Sim clients reconnect on their own (see network.worker.js), so
+# a momentary drop shouldn't cost a visitor their run. Swept by the test
+# watchdog, so the real wait is this plus up to one 5s watchdog tick.
+RECONNECT_GRACE_SECONDS = 15
+
+# Health monitor: sampling period, the loop lag worth a warning, and how often
+# to log a summary line. Lag is how far behind schedule the event loop is
+# running; sustained lag above the Socket.IO ping timeout drops every client.
+HEALTH_TICK_SECONDS = 1.0
+HEALTH_LAG_WARN_SECONDS = 1.0
+HEALTH_SUMMARY_SECONDS = 60
+
 # Arduino serial connection (PN532 RFID + start button)
 SERIAL_PORT = "/dev/ttyACM0"   # Arduino Uno native USB
 SERIAL_BAUD = 115200

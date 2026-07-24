@@ -1,6 +1,7 @@
 """Manages connected simulation client computers and tissue assignments."""
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,10 @@ class ClientManager:
     only the clients that were active when the test started are tracked for
     completion.  Clients that connect or disconnect while locked do not
     trigger a reassignment, which prevents mid-test stats corruption.
+
+    A locked client that drops does not forfeit its place immediately: its slot
+    is held so the same screen can reclaim it when its Socket.IO client
+    reconnects, which it does on its own.  Only expire_pending() gives up.
     """
 
     def __init__(self):
@@ -21,6 +26,10 @@ class ClientManager:
         # Populated by lock(); cleared by unlock().
         self._expected_completers = set()
         self._locked = False
+        # sid → slot held for an expected completer that dropped mid-test. The
+        # sid stays in _expected_completers while held, so the exhibit doesn't
+        # reset out from under a client that is about to reconnect.
+        self._pending_reconnect = {}
 
     # ------------------------------------------------------------------
     # Test lifecycle
@@ -29,6 +38,7 @@ class ClientManager:
     def lock(self):
         """Snapshot active clients as expected completers; freeze assignments."""
         self._locked = True
+        self._pending_reconnect = {}
         self._expected_completers = {
             sid for sid, c in self.clients.items() if c["assigned_tissues"]
         }
@@ -42,10 +52,39 @@ class ClientManager:
         """Unfreeze assignments so new clients are incorporated normally."""
         self._locked = False
         self._expected_completers = set()
+        self._pending_reconnect = {}
+
+    def expire_pending(self, grace_seconds):
+        """Give up on held slots whose grace period has run out.
+
+        Returns the sids released.  An expiry can be what finally settles a
+        test — the remaining clients may all be done, or none may be left — so
+        callers should re-check completion when this returns anything.
+        """
+        if not self._pending_reconnect:
+            return []
+
+        now = time.monotonic()
+        expired = [
+            sid for sid, slot in self._pending_reconnect.items()
+            if now - slot["since"] >= grace_seconds
+        ]
+        for sid in expired:
+            del self._pending_reconnect[sid]
+            self._expected_completers.discard(sid)
+            logger.warning(
+                "Gave up on %s: no reconnect within %ss (%d completer(s) left)",
+                sid, grace_seconds, len(self._expected_completers),
+            )
+        return expired
 
     @property
     def expected_completer_count(self):
         return len(self._expected_completers)
+
+    @property
+    def pending_reconnect_count(self):
+        return len(self._pending_reconnect)
 
     def is_expected_completer(self, sid):
         """True if this client was tracked for completion at test-start."""
@@ -66,26 +105,77 @@ class ClientManager:
         }
         if not self._locked:
             self._reassign_tissues()
-        else:
+        elif not self._reclaim_slot(sid, info):
             # Mid-test observer: no tissue assignment, not tracked for completion.
             logger.info(
                 "Client %s registered mid-test (observer only, total: %d)",
                 sid, len(self.clients),
             )
 
+    def _client_key(self, info):
+        """Identity for a screen that survives a reconnect.
+
+        Each exhibit PC is pinned to one tissue by its ?tissue=<n> URL param and
+        reports it at registration, so the tissue index names the screen.
+        Clients without one (dev grid mode) share a single key; with one such
+        client that is exact, and with several they are interchangeable anyway.
+        """
+        idx = (info or {}).get("singleTissueIndex")
+        return "grid" if idx is None else "tissue:%s" % idx
+
+    def _reclaim_slot(self, sid, info):
+        """Hand a reconnecting screen back the slot it held before it dropped.
+
+        Returns True if a slot was reclaimed.
+        """
+        key = self._client_key(info)
+        match = next(
+            (old for old, slot in self._pending_reconnect.items() if slot["key"] == key),
+            None,
+        )
+        if match is None:
+            return False
+
+        slot = self._pending_reconnect.pop(match)
+        self._expected_completers.discard(match)
+        self._expected_completers.add(sid)
+        client = self.clients[sid]
+        client["assigned_tissues"] = slot["assigned_tissues"]
+        client["status"] = slot["status"]
+        client["last_stats"] = slot["last_stats"]
+        logger.info(
+            "Client %s reconnected as %s after %.1fs; test continues (tissues %s)",
+            match, sid, time.monotonic() - slot["since"], client["assigned_tissues"],
+        )
+        return True
+
     def unregister(self, sid):
         """Remove a disconnected client."""
-        if sid not in self.clients:
+        client = self.clients.pop(sid, None)
+        if client is None:
             return
-        del self.clients[sid]
         if self._locked:
-            # Remove from completion tracking so the test can still finish.
             if sid in self._expected_completers:
-                self._expected_completers.discard(sid)
-                logger.warning(
-                    "Expected completer %s disconnected mid-test (%d remaining)",
-                    sid, len(self._expected_completers),
-                )
+                if client["status"] == "complete":
+                    # Already reported its results; nothing left to wait for.
+                    self._expected_completers.discard(sid)
+                else:
+                    # Hold the slot instead of dropping it: the client reconnects
+                    # by itself, and forfeiting here over a momentary blip is what
+                    # used to reset the whole exhibit mid-test.  The sid stays in
+                    # _expected_completers so no_completers_left() reads False
+                    # until expire_pending() gives up on it.
+                    self._pending_reconnect[sid] = {
+                        "key": self._client_key(client["info"]),
+                        "assigned_tissues": client["assigned_tissues"],
+                        "status": client["status"],
+                        "last_stats": client["last_stats"],
+                        "since": time.monotonic(),
+                    }
+                    logger.warning(
+                        "Expected completer %s dropped mid-test; holding its slot "
+                        "for a reconnect", sid,
+                    )
         else:
             self._reassign_tissues()
         logger.info("Client unregistered: %s (total: %d)", sid, len(self.clients))
@@ -124,9 +214,9 @@ class ClientManager:
     def all_complete(self):
         """Return True when every expected completer has sent test_complete.
 
-        Uses the snapshot taken at lock() time, so mid-test disconnects
-        (which call unregister → _expected_completers.discard) don't block
-        completion indefinitely.
+        Uses the snapshot taken at lock() time.  A client whose slot is being
+        held for a reconnect is deliberately not complete — the test waits for
+        it — but expire_pending() bounds that wait, so completion can't hang.
         """
         if not self._expected_completers:
             return False
@@ -155,6 +245,11 @@ class ClientManager:
         for client in self.clients.values():
             if client["last_stats"]:
                 all_stats.extend(client["last_stats"])
+        # Keep the last stats from screens that are mid-reconnect, so their
+        # tissue doesn't vanish from the display while we wait for them.
+        for slot in self._pending_reconnect.values():
+            if slot["last_stats"]:
+                all_stats.extend(slot["last_stats"])
         all_stats.sort(key=lambda s: s.get("tissueIndex", 0))
         return all_stats
 

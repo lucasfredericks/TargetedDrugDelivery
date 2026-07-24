@@ -248,6 +248,12 @@ def handle_join_display():
     join_room("display")
     # Send current state
     emit("state_sync", state_machine.get_status())
+    # The client count is otherwise only pushed when it changes, and those emits
+    # go to the display room — so any sim client that registered before this page
+    # joined was missed and the footer would sit at the template's 0 until the
+    # next connect or disconnect. On a cold boot the sim PCs usually win that
+    # race, which is exactly when the count reads 0 with four screens running.
+    emit("client_count", {"count": client_manager.count})
     logger.info("Display joined")
 
 
@@ -570,17 +576,23 @@ def _action_dispatch_loop():
 
 
 def _test_watchdog_loop():
-    """Eventlet greenlet: auto-reset if a test exceeds TEST_TIMEOUT_SECONDS.
+    """Eventlet greenlet: guard the test lifecycle.
 
-    Covers scenarios where sim clients stall, all clients disconnect mid-test,
-    or a network failure prevents test_complete from reaching the server.
-    Checks every 5 seconds; tracks elapsed time only while in TESTING state.
+    Two jobs, both on a 5s tick:
+      - release slots held for clients that dropped mid-test and never came
+        back, then re-check completion (an expiry can complete or reset a test);
+      - auto-reset if a test exceeds TEST_TIMEOUT_SECONDS, covering stalled sim
+        clients or a network failure that keeps test_complete from arriving.
     """
-    from config import TEST_TIMEOUT_SECONDS
+    from config import TEST_TIMEOUT_SECONDS, RECONNECT_GRACE_SECONDS
     test_started_at = None
 
     while True:
         socketio.sleep(5)
+
+        if client_manager.expire_pending(RECONNECT_GRACE_SECONDS):
+            _check_test_done()
+
         if state_machine.state == State.TESTING:
             if test_started_at is None:
                 test_started_at = time.monotonic()
@@ -597,6 +609,68 @@ def _test_watchdog_loop():
                 test_started_at = None
         else:
             test_started_at = None
+
+
+def _health_snapshot():
+    """One-line resource summary. Best effort — never raises, never blocks."""
+    parts = []
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts.append("rss=" + "".join(line.split()[1:]))
+                    break
+    except OSError:
+        pass
+    try:
+        parts.append("fds=%d" % len(os.listdir("/proc/self/fd")))
+    except OSError:
+        pass
+    parts.append("threads=%d" % threading.active_count())
+    parts.append("clients=%d" % client_manager.count)
+    if client_manager.pending_reconnect_count:
+        parts.append("awaiting_reconnect=%d" % client_manager.pending_reconnect_count)
+    parts.append("state=%s" % state_machine.state.name)
+    return " ".join(parts)
+
+
+def _health_loop():
+    """Eventlet greenlet: report event-loop stalls and resource trends.
+
+    Each tick measures how much longer the sleep actually took than it asked
+    for.  That overshoot is the event loop's lag, and it is the quantity that
+    matters here: while the loop is stalled the server answers no Socket.IO
+    heartbeats, so a stall approaching ping_timeout drops every sim client at
+    once and the exhibit resets with "All simulation clients lost".  Logging the
+    lag with the memory/fd/thread numbers from the moment it ended is what
+    separates a memory or I/O problem from a network one after the fact —
+    without having to reproduce the fault on demand.
+    """
+    from config import (
+        HEALTH_TICK_SECONDS, HEALTH_LAG_WARN_SECONDS, HEALTH_SUMMARY_SECONDS,
+    )
+
+    last = time.monotonic()
+    window_start = last
+    peak_lag = 0.0
+
+    while True:
+        socketio.sleep(HEALTH_TICK_SECONDS)
+        now = time.monotonic()
+        lag = (now - last) - HEALTH_TICK_SECONDS
+        last = now
+        peak_lag = max(peak_lag, lag)
+
+        if lag >= HEALTH_LAG_WARN_SECONDS:
+            logger.warning("Event loop stalled %.1fs | %s", lag, _health_snapshot())
+
+        if now - window_start >= HEALTH_SUMMARY_SECONDS:
+            logger.info(
+                "Health: peak loop lag %.2fs over %ds | %s",
+                peak_lag, int(now - window_start), _health_snapshot(),
+            )
+            peak_lag = 0.0
+            window_start = now
 
 
 def _do_sensor_read(svc):
@@ -668,8 +742,11 @@ def main():
     # callbacks into the eventlet loop where socketio.emit works reliably.
     socketio.start_background_task(_action_dispatch_loop)
 
-    # Watchdog: auto-reset if a test runs longer than TEST_TIMEOUT_SECONDS.
+    # Watchdog: expire held reconnect slots; auto-reset overrunning tests.
     socketio.start_background_task(_test_watchdog_loop)
+
+    # Health monitor: event-loop lag + resource trends over long uptimes.
+    socketio.start_background_task(_health_loop)
 
     if args.no_hardware:
         logger.info("Running without hardware (display/network only)")
