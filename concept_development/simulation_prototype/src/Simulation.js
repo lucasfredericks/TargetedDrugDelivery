@@ -44,7 +44,8 @@ class Simulation {
     this.tracerCount = 3000; // Target number of tracer particles
     this.cells = [];
     this.buffer = null;
-    this.particleSprite = null;
+    // Sprites are built lazily per ligand arrangement, one entry per unique
+    // arrangement, and freed together by resetSpriteCache().
     this.spriteCache = new Map();  // key: ligandPositions.join(','), value: p5.Graphics
     this.initialized = false;
 
@@ -75,7 +76,7 @@ class Simulation {
   }
 
   /**
-   * Initialize the simulation (create buffer, generate cells, build sprite)
+   * Initialize the simulation (create buffer, generate cells)
    * Must be called after p5 setup
    */
   initialize() {
@@ -86,8 +87,8 @@ class Simulation {
     // Generate cells
     this.generateCells();
 
-    // Generate particle sprite
-    this.regenerateSprite();
+    // Particle sprites are not built here — each arrangement is generated on
+    // first use by _getSpriteForArrangement() and cached.
 
     // Initialize GPU fluid simulation if enabled
     console.log('Fluid sim check:', {
@@ -226,15 +227,30 @@ class Simulation {
   }
 
   /**
-   * Regenerate particle sprite based on current ligand configuration
+   * Drop every cached sprite so the next particles rebuild them for the current
+   * ligand/toxicity configuration. Call after changing either.
    */
-  regenerateSprite() {
+  resetSpriteCache() {
+    // Dropping our references to the old sprites is NOT enough to free them:
+    // p5's createGraphics() appends the canvas element to the DOM and pushes the
+    // p5.Graphics into the sketch's _elements array, so both keep a live
+    // reference forever. Only remove() detaches them. Without this, every
+    // reset leaks a canvas per cached sprite and the kiosk eventually dies with
+    // "Out of Memory".
+    for (const sprite of this.spriteCache.values()) {
+      this._freeSprite(sprite);
+    }
     this.spriteCache.clear();
-    this.particleSprite = generateParticleSprite(
-      this.physicsParams.particleSpriteSize,
-      this.ligandPositions,
-      this.toxicity
-    );
+  }
+
+  /**
+   * Release a p5.Graphics sprite so its canvas can actually be collected.
+   * Safe to call on null, on a non-p5 stub, or twice on the same sprite.
+   * Particles still holding the sprite keep rendering correctly — a detached
+   * canvas is still a valid drawImage() source.
+   */
+  _freeSprite(sprite) {
+    if (sprite && typeof sprite.remove === 'function') sprite.remove();
   }
 
   _randomizeLigandPositions(canonical) {
@@ -890,20 +906,30 @@ class Simulation {
   // --- Configuration Updates ---
 
   /**
-   * Update ligand positions and regenerate sprite
+   * Update ligand positions and drop the now-stale sprites.
+   * No-ops when the arrangement is unchanged. The Pi suppresses identical
+   * ligand_update broadcasts, but this guard is what makes that a performance
+   * optimization rather than a correctness requirement.
    */
   setLigandPositions(positions) {
-    this.ligandPositions = positions.slice(0, 6);
-    this.regenerateSprite();
+    const next = positions.slice(0, 6);
+    if (next.length === this.ligandPositions.length &&
+        next.every((v, i) => v === this.ligandPositions[i])) {
+      return;
+    }
+    this.ligandPositions = next;
+    this.resetSpriteCache();
     this.theoreticalScore = this.computeTheoreticalScore();
   }
 
   /**
-   * Update toxicity and regenerate sprite
+   * Update toxicity and rebuild sprites (no-op if unchanged — see
+   * setLigandPositions; toxicity is re-sent with every start_test).
    */
   setToxicity(toxicity) {
+    if (toxicity === this.toxicity) return;
     this.toxicity = toxicity;
-    this.regenerateSprite();
+    this.resetSpriteCache();
   }
 
   /**

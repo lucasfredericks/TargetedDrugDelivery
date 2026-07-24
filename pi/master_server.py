@@ -289,10 +289,7 @@ def action_scan_nanoparticle():
     })
     # Push ligand positions to sim clients so they can update affinity preview
     if state_machine.state != State.TESTING:
-        socketio.emit("ligand_update", {
-            "ligandPositions": positions,
-            "puzzle": state_machine.current_puzzle,
-        }, room="sim_clients")
+        _broadcast_ligand_update(positions, state_machine.current_puzzle)
     logger.info("Nanoparticle scanned: %s", colors)
 
 
@@ -336,10 +333,7 @@ def action_scan_rfid(uid=None):
         return
 
     # Push puzzle tissue config to sim clients so affinity preview updates immediately.
-    socketio.emit("ligand_update", {
-        "ligandPositions": state_machine.ligand_positions,
-        "puzzle": puzzle,
-    }, room="sim_clients")
+    _broadcast_ligand_update(state_machine.ligand_positions, puzzle)
     logger.info("Puzzle loaded: %s", puzzle_id)
 
 
@@ -454,6 +448,38 @@ def _sid():
 def _emit_to_display(event, data):
     """Send an event to all display clients."""
     socketio.emit(event, data, room="display")
+
+
+# Signature of the last ligand_update broadcast to sim_clients, used to suppress
+# identical repeats (see _broadcast_ligand_update).
+_last_ligand_signature = None
+
+
+def _broadcast_ligand_update(positions, puzzle):
+    """Send ligand_update to all sim clients, skipping unchanged payloads.
+
+    The sensor loop polls several times a second but the reading is almost
+    always the same one it sent last time, and a sim client treats every
+    ligand_update as a real change: it rebuilds its nanoparticle sprites and
+    recomputes affinity.  Broadcasting only actual changes keeps that work
+    proportional to what visitors do rather than to uptime.
+
+    Suppression is safe for clients that arrive or reload later: handle_register
+    pushes the current ligand/puzzle state directly to each client as it
+    registers, so nobody depends on the periodic repeats to catch up.
+
+    Returns True if the event was sent.
+    """
+    global _last_ligand_signature
+    payload = {"ligandPositions": positions, "puzzle": puzzle}
+    # Compare a serialized snapshot: the caller may hand us objects that are
+    # later mutated in place, which a stored reference would not notice.
+    signature = _json.dumps(payload, sort_keys=True, default=str)
+    if signature == _last_ligand_signature:
+        return False
+    socketio.emit("ligand_update", payload, room="sim_clients")
+    _last_ligand_signature = signature
+    return True
 
 
 def _on_state_change(old, new):
@@ -617,10 +643,7 @@ def _sensor_poll_loop():
                 "tagPresent": True,
             })
             if state_machine.state != State.TESTING:
-                socketio.emit("ligand_update", {
-                    "ligandPositions": positions,
-                    "puzzle": state_machine.current_puzzle,
-                }, room="sim_clients")
+                _broadcast_ligand_update(positions, state_machine.current_puzzle)
         except Exception as e:
             logger.error("Sensor poll error: %s", e)
 
