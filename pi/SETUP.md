@@ -8,6 +8,10 @@ The system uses two controllers:
 - **Arduino Uno**: Reads RFID tags (PN532 shield) and a start button,
   communicating with the Pi over USB serial
 
+Once the exhibit is built and running, OPERATIONS.md covers the day-to-day:
+opening and closing, reading the health log, and what to do when a screen drops
+or the exhibit resets itself.
+
 
 Prerequisites
 -------------
@@ -420,6 +424,10 @@ To also auto-start the display in Chromium, add to
 
 Troubleshooting
 ---------------
+
+Problems that show up while the exhibit is running — screens dropping, the
+exhibit resetting itself, the client count reading low — are in OPERATIONS.md.
+Below are setup and hardware faults.
 
 "No sensors detected"
 - Check I2C is enabled: sudo raspi-config -> Interface Options -> I2C
