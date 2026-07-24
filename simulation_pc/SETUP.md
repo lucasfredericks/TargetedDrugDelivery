@@ -125,6 +125,38 @@ focus. Launch a **dedicated profile** and mark it clean-exit so the bar never
 appears. The commands below use `--user-data-dir=C:\exhibit\chromium-profile` for
 that; create the folder once (`mkdir C:\exhibit\chromium-profile`).
 
+### Prerequisite: enable Skia Graphite (fixes low framerate)
+
+Out of the box Chromium renders the simulation at a noticeably low framerate.
+Enabling **Skia Graphite** — Chromium's newer GPU rasterization backend — restores
+full speed. The simulation draws the tissues and cells to a 2D canvas every frame,
+so it is entirely dependent on that canvas being GPU-accelerated.
+
+**Do this in the kiosk profile.** `chrome://flags` settings are stored per
+`--user-data-dir`, so setting the flag in a normal Chromium window does **not**
+apply to the kiosk, which runs its own `C:\exhibit\chromium-profile`. Launch that
+profile directly (not in kiosk, so you can use the address bar):
+
+```
+"C:\exhibit\ungoogled-chromium\chrome.exe" --user-data-dir=C:\exhibit\chromium-profile
+```
+
+Then:
+
+1. Go to `chrome://flags`.
+2. Search for **Skia Graphite**.
+3. Set it to **Enabled**.
+4. Click **Relaunch**, then close the window. The kiosk picks it up on next boot.
+
+Verify at `chrome://gpu` — under **Graphics Feature Status**, canvas and
+rasterization should report as hardware accelerated, and the page should list
+Graphite as the Skia backend in use.
+
+**Re-check this after replacing the Chromium build.** The flag lives in the
+profile, so it survives a browser upgrade — but flags do get renamed, promoted to
+default, or removed between versions, so confirm it's still set when you drop in a
+fresh build.
+
 ### Option A: Startup-folder shortcut (simplest)
 
 1. Press `Win+R`, type `shell:startup`, Enter. This opens the current user's
@@ -199,6 +231,11 @@ is only about the PC itself finishing boot — it isn't required for correctness
   `?server=`.
 - **A screen renders all 4 tissues instead of one:** its `tissue=` param is
   missing or out of range (must be `0`–`3`).
+- **Low framerate / choppy animation:** Skia Graphite isn't enabled on that PC.
+  See the prerequisite above — and note the flag is per-profile, so check it in
+  the kiosk's own `C:\exhibit\chromium-profile`, not a default Chromium window.
+  A screen rendering all 4 tissues also has 4× the work to do, so confirm its
+  `tissue=` param is set before chasing GPU settings.
 - **More than 4 tissues:** the exhibit assumes a 4-tissue puzzle layout. Extend
   the tissue indices and add screens accordingly.
 - **Display:** the results display is not a sim PC — it runs on the Pi's own HDMI
