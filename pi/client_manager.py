@@ -36,7 +36,19 @@ class ClientManager:
     # ------------------------------------------------------------------
 
     def lock(self):
-        """Snapshot active clients as expected completers; freeze assignments."""
+        """Snapshot active clients as expected completers; freeze assignments.
+
+        Reassign first so every currently-connected client holds a tissue.
+        Assignment is otherwise only refreshed reactively when a client
+        registers or unregisters while unlocked, so a client can be connected
+        yet unassigned — e.g. it joined mid-test as an observer and stayed on
+        across the test boundary (unlock does not reassign). Without this, a
+        fresh test could lock with 0 expected completers despite clients being
+        present, and the first test_complete would trip the "all clients lost"
+        auto-reset. This runs at test start, when every connected client is a
+        legitimate participant, so reassigning here is always correct.
+        """
+        self._reassign_tissues()
         self._locked = True
         self._pending_reconnect = {}
         self._expected_completers = {
