@@ -154,6 +154,13 @@ This is rare by design. Tag remapping happens only when a card fails or a puzzle
 board is swapped; deploys and recalibration are deliberate maintenance. The cost
 of the off/on cycle buys a Pi that tolerates being switched off at the wall.
 
+The four simulation PCs use the same reboot-to-restore model via Deep Freeze, and
+the same discipline applies to them: thaw, make the change, verify a clean boot,
+re-freeze. See [../simulation_pc/SETUP.md](../simulation_pc/SETUP.md), "Deep Freeze
+(reboot-to-restore)." Because the sim PCs hold no state of their own, a change
+there is usually a browser update or a `tissue=`/Pi-address edit — never anything
+that needs committing.
+
 ### The cycle
 
 1. Turn the overlay off, then reboot so the root mounts writable:

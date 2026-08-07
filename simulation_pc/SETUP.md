@@ -209,6 +209,53 @@ is only about the PC itself finishing boot — it isn't required for correctness
 
 ---
 
+## Deep Freeze (reboot-to-restore) — apply last
+
+[Deep Freeze](https://www.faronics.com/products/deep-freeze) restores the machine
+to a frozen baseline on every reboot, discarding all disk changes. It's a good fit
+here because a sim PC keeps **no local state** — everything comes from the Pi — so
+there is nothing on the machine that needs to survive a reboot. It also strengthens
+the multi-day-uptime story: a reboot is a full reset of the browser and OS, a
+stronger version of the 4 AM in-page reload the simulation already does.
+
+The catch is that Deep Freeze locks the machine to whatever state it's in **at
+freeze time**. Everything on this page is set-once config that a reboot will
+silently revert if it wasn't captured in the baseline — the Skia Graphite flag
+especially. So freeze only when the PC is fully built and verified.
+
+**Before you freeze:**
+
+1. Confirm a clean cold boot: power-cycle the PC and watch it land in the kiosk,
+   showing this screen's tissue at full framerate. If any of that needs a manual
+   fix, it isn't in the baseline yet — fix it and re-verify.
+2. Check the baseline holds everything a reboot must reproduce:
+   - The kiosk autostart (Startup shortcut or scheduled task) with the correct
+     `pi=` and this PC's `tissue=`.
+   - Auto-login (`netplwiz`), and Assigned Access if you're using it.
+   - The `C:\exhibit\chromium-profile` with **Skia Graphite enabled** (verify at
+     `chrome://gpu`) and the crash-restore bubble disabled.
+3. **Close Chromium gracefully** so the profile is frozen in a clean-exit state —
+   otherwise every boot restores a "dirty" profile and shows the restore bubble.
+4. **Pause Windows Update and automatic driver updates.** Deep Freeze reverts
+   updates on reboot, which can trap Windows in an install→revert→reinstall loop,
+   and a reverted GPU driver silently breaks the Skia acceleration you just set up.
+
+Then freeze.
+
+Things that are **not** a problem: the system clock is preserved across reboots
+(Deep Freeze only freezes the disk), so the 4 AM reload keeps correct local time;
+and the browser cache being wiped each reboot just means every cold boot re-fetches
+the simulation fresh from the Pi — so a Pi-side `git pull` can never be masked by a
+stale cached bundle.
+
+**Making a change later** — new Chromium build, changed Pi IP, re-checking the
+Skia flag, a `tissue=` change — means thawing Deep Freeze, making the change,
+re-verifying a clean boot, and re-freezing. This mirrors the Pi's own
+reboot-to-restore discipline; see [OPERATIONS.md](../pi/OPERATIONS.md), "Making
+changes when the root is read-only."
+
+---
+
 ## Optional launcher params
 
 | Param | Default | Notes |

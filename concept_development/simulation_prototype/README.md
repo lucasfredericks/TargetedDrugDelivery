@@ -1,68 +1,50 @@
-Simulation prototype
+# Simulation Prototype (developer reference)
 
-Quick start — Local development
+The browser simulation itself: a p5.js sketch that renders the tissues, cells,
+particles, and binding, plus the networking layer that connects it to the Pi in
+exhibit mode. This document is for working on that code.
 
-- Open `index.html` in a browser (double-click) to run the prototype.
-- Open `dashboard.html` in a separate tab to control ligands and run tests.
-- The page uses p5.js and Socket.IO from CDN; no build step required.
-- Communication between dashboard and simulation uses BroadcastChannel (same browser only).
+**Installing or running the exhibit is documented elsewhere** — start at the
+[documentation index](../../docs/README.md):
 
-URL parameters:
+- Pi master (hardware, install, configuration): [../../pi/SETUP.md](../../pi/SETUP.md)
+- Simulation PC kiosks: [../../simulation_pc/SETUP.md](../../simulation_pc/SETUP.md)
+- Running the exhibit day to day: [../../pi/OPERATIONS.md](../../pi/OPERATIONS.md)
 
-- `?tissue=N` — Full-screen single tissue (N = 0–3: Tumor, Heart, Liver, Lung)
-- `?fluid=true` — Enable GPU-accelerated fluid simulation (requires WebGL 2)
+## Local development
 
-Quick start — Exhibit mode (Raspberry Pi)
+- Open `index.html` in a browser to run the prototype standalone.
+- Open `dashboard.html` in a second tab to control ligands and run tests.
+- p5.js and Socket.IO are bundled in `lib/` — no build step and no network needed.
+- The dashboard drives the simulation over `BroadcastChannel` (same browser only).
+  Pointing the simulation at a Pi instead switches it to Socket.IO — see
+  [src/network.js](src/network.js).
 
-In exhibit mode, a Raspberry Pi acts as the master controller with physical inputs
-(color sensors, RFID, buttons), and 1–4 client computers run the simulation.
+### URL parameters
 
-Pi setup:
+- `?server=<host:port>` — exhibit mode: connect to the Pi master over Socket.IO.
+  Without it, the simulation runs in local BroadcastChannel dev mode and never
+  reaches a Pi.
+- `?tissue=N` — render a single tissue full-screen (N = 0–3: Tumor, Heart, Liver,
+  Lung). Omit it to render all four in a 2×2 grid.
+- `?fluid=true` — enable the GPU fluid-sim background (requires WebGL 2).
 
-```bash
-cd pi/
-pip install -r requirements.txt
-python master_server.py
-```
+## Architecture
 
-Use `--no-gpio`, `--no-sensors`, or `--no-rfid` flags to skip hardware that isn't
-connected (useful for testing on a non-Pi machine):
+- [src/main.js](src/main.js) — entry point; creates the four `Simulation`
+  instances and wires them to the network.
+- [src/network.js](src/network.js) + [src/network.worker.js](src/network.worker.js)
+  — Socket.IO (exhibit) / BroadcastChannel (dev) abstraction behind one
+  `NetworkClient` interface. The socket runs in a Web Worker so the Engine.IO
+  heartbeat is answered even when the draw loop saturates the main thread.
+- [src/Simulation.js](src/Simulation.js) — one tissue: owns its cells, particles,
+  physics, and rendering to an offscreen buffer.
+- `src/Cell.js`, `src/Particle.js`, `src/Receptor.js`, `src/BindingLogic.js` — the
+  model: cells with receptors, drug particles, and the binding rules between them.
+- `src/FluidSimulation.js`, `src/FluidShaders.js` — the optional fluid background.
+- `puzzle_example.json` — an example puzzle (4 tissues × 6 receptor concentrations).
 
-```bash
-python master_server.py --no-gpio --no-sensors --no-rfid
-```
-
-Client setup:
-
-Open the simulation in a browser pointed at the Pi server:
-
-```
-index.html?server=192.168.1.1:5000
-```
-
-The client will connect via Socket.IO, register with the master, and receive tissue
-assignments automatically. Multiple clients split the 4 tissues evenly.
-
-Pi display:
-
-The Pi serves a results dashboard at `http://<pi-ip>:5000/` — open this in Chromium
-on the Pi's HDMI display to show scores, nanoparticle preview, and test progress.
-
-Hardware
-
-- 6x Adafruit APDS-9960 color sensors (I2C) via TCA9548A multiplexer — read ligand colors
-- MFRC522 RFID reader (SPI) — load puzzle configurations from tagged boards
-- 3 GPIO buttons — Scan Nanoparticle, Start Test, Reset
-
-Run `python pi/color_calibration.py` to calibrate sensor RGB values for your physical
-ligand pieces. Run `python pi/test_sensors.py` to verify sensor wiring.
-
-What's included
-
-- `index.html` — Simulation canvas entrypoint
-- `dashboard.html` — Control panel with ligand editor (local dev)
-- `src/` — Modular simulation (Simulation, Cell, Particle, Receptor, BindingLogic, FluidSimulation, etc.)
-- `src/network.js` — Socket.IO / BroadcastChannel abstraction
-- `src/main.js` — Entry point coordinating simulations and network
-- `puzzle_example.json` — Example puzzle (4 tissues × 6 receptor concentrations)
-- `pi/` — Raspberry Pi master server, sensor services, display, and puzzle configs
+In exhibit mode the Pi is the single source of truth: it serves these files and
+coordinates every client, so a code change is deployed by pulling it on the Pi,
+not by touching the PCs. See [../../pi/OPERATIONS.md](../../pi/OPERATIONS.md),
+"Deploying a change."
