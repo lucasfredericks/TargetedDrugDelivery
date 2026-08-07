@@ -121,6 +121,10 @@ warnings fire on the event, not the schedule, so they are unaffected.
 Deploying a change
 ------------------
 
+If the Pi runs with the read-only overlay enabled, a plain `git pull` lands in
+the throwaway layer and is gone at the next reboot. Disable the overlay first —
+see "Making changes when the root is read-only" below.
+
 1. `git pull` on the Pi.
 2. `sudo systemctl restart tdd-exhibit`.
 3. If anything under `concept_development/simulation_prototype/` changed, reload
@@ -134,3 +138,64 @@ Check the service came back:
 
     systemctl status tdd-exhibit
     journalctl -u tdd-exhibit -n 30
+
+
+Making changes when the root is read-only
+-----------------------------------------
+
+If you enable the read-only overlay filesystem — to keep an unplug from
+corrupting the SD card — the real root is frozen and every write lands in a
+throwaway layer that is discarded on the next reboot. Anything meant to last (a
+code deploy, a re-run of calibration, a new tag mapping) has to be written with
+the overlay turned off and then committed to git, so it survives both the reboot
+and a future reimage.
+
+This is rare by design. Tag remapping happens only when a card fails or a puzzle
+board is swapped; deploys and recalibration are deliberate maintenance. The cost
+of the off/on cycle buys a Pi that tolerates being switched off at the wall.
+
+### The cycle
+
+1. Turn the overlay off, then reboot so the root mounts writable:
+
+       sudo raspi-config
+       # Performance Options -> Overlay File System -> disable
+       sudo reboot
+
+2. Make the change:
+   - Tag mapping: the admin dashboard at `http://<pi-ip>:5000/admin`, or edit
+     `puzzles/index.json` by hand (see SETUP.md, "Register RFID Tags").
+   - Code: `git pull` (see "Deploying a change").
+   - Calibration: `color_calibration.py`, which rewrites `color_map.json`.
+
+3. Commit anything that must outlive a reimage. The mappings and the calibration
+   are device state, not part of the base image, so an uncommitted change is as
+   good as lost:
+
+       cd ~/TargetedDrugDelivery/pi
+       git add puzzles/index.json color_map.json
+       git commit -m "Remap tag ..."
+       git push        # if this Pi has a remote configured
+
+4. Turn the overlay back on. This is the step that restores the unplug
+   hardening, so treat it as part of the job — a Pi left with the overlay off is
+   silently unprotected until someone notices:
+
+       sudo raspi-config
+       # Performance Options -> Overlay File System -> enable
+       sudo reboot
+
+5. Confirm it is back on, then run one test with a card to confirm the exhibit
+   still reads and scores:
+
+       findmnt -no FSTYPE /        # "overlay" when the read-only overlay is active
+
+### Notes
+
+- `mount -o remount,rw /` does not help. It appears to succeed but only writes
+  into the volatile overlay, so the change still vanishes on reboot. The overlay
+  has to be disabled and the Pi rebooted for a write to reach the card.
+- The server writes `index.json` atomically, so a power loss can never leave it
+  half-written. That is separate from the overlay problem: a dashboard save with
+  the overlay on is complete and valid, and still gone at the next reboot.
+  Committing is what makes it stick.

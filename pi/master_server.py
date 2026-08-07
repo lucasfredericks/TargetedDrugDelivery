@@ -167,9 +167,20 @@ def _load_puzzle_index_raw():
 
 
 def _save_puzzle_index(mappings):
+    # Write atomically: a truncate-in-place write that loses power partway
+    # through would leave index.json corrupt, and it is the only copy of the
+    # tag->puzzle mappings. Write a sibling temp file, fsync it, then rename
+    # over the original -- rename is atomic on the same filesystem, so a reader
+    # (or a power loss) sees either the old file or the complete new one. This
+    # matters most if index.json ever lives on a writable partition under an
+    # otherwise read-only root.
     from config import PUZZLES_INDEX_PATH
-    with open(PUZZLES_INDEX_PATH, "w") as f:
+    tmp_path = PUZZLES_INDEX_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
         _json.dump(mappings, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, PUZZLES_INDEX_PATH)
 
 
 # --- Socket.IO: Simulation Client Events ---
