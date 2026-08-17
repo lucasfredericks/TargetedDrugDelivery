@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import logging
+import time
 import glob
 
 import serial
@@ -19,6 +20,12 @@ import serial
 from config import PUZZLES_DIR, PUZZLES_INDEX_PATH, SERIAL_BAUD, SERIAL_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+# Reader-loop reconnect backoff (seconds): grows on repeated failure so a
+# permanently unplugged Arduino doesn't spin the CPU, and resets to the floor
+# once a connection is reestablished.
+RECONNECT_BACKOFF_START = 1.0
+RECONNECT_BACKOFF_MAX = 30.0
 
 
 class ArduinoRFIDService:
@@ -36,6 +43,7 @@ class ArduinoRFIDService:
         }
         self._thread = None
         self._running = False
+        self._reconnect_backoff = RECONNECT_BACKOFF_START
 
     def initialize(self):
         """Open serial connection and start listener thread."""
@@ -47,25 +55,45 @@ class ArduinoRFIDService:
             logger.error("No Arduino detected")
             return
 
+        if not self._open_serial(self.port):
+            # Leave self.ser is None so the master server can fall back to
+            # running without RFID/button hardware.
+            return
+
+        self._running = True
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+
+    def _open_serial(self, port):
+        """Open *port* and wait for the Arduino's ready line.
+
+        Sets self.ser and self.port on success and returns True; on failure
+        leaves self.ser is None and returns False. Reopening the port resets
+        the Uno (DTR toggle), so the Arduino re-announces itself and re-emits
+        any present tag — which is what lets a reconnect resync cleanly.
+        """
         try:
-            self.ser = serial.Serial(
-                self.port,
-                baudrate=SERIAL_BAUD,
-                timeout=SERIAL_TIMEOUT
-            )
-            logger.info("Arduino serial opened on %s", self.port)
-
-            # Wait for Arduino ready message
-            self._wait_for_ready()
-
-            # Start background reader
-            self._running = True
-            self._thread = threading.Thread(target=self._reader_loop, daemon=True)
-            self._thread.start()
-
-        except Exception as e:
-            logger.error("Failed to open serial %s: %s", self.port, e)
+            self.ser = serial.Serial(port, baudrate=SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
+        except (serial.SerialException, OSError) as e:
+            logger.error("Failed to open serial %s: %s", port, e)
             self.ser = None
+            return False
+
+        self.port = port
+        logger.info("Arduino serial opened on %s", port)
+        # Wait for Arduino ready message (best effort — the reader loop still
+        # picks up later lines if this times out).
+        self._wait_for_ready()
+        return True
+
+    def _close_serial(self):
+        """Close the serial port if open, ignoring errors. Leaves self.ser is None."""
+        if self.ser is not None:
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+        self.ser = None
 
     def _detect_port(self):
         """Auto-detect Arduino serial port."""
@@ -80,7 +108,6 @@ class ArduinoRFIDService:
 
     def _wait_for_ready(self, timeout=5):
         """Wait for the Arduino 'ready' message."""
-        import time
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -100,11 +127,21 @@ class ArduinoRFIDService:
         return False
 
     def _reader_loop(self):
-        """Background thread: read serial lines and dispatch events."""
+        """Background thread: read serial lines and dispatch events.
+
+        On a serial failure — a USB glitch, autosuspend dropping the device, a
+        re-enumeration, or the Arduino briefly resetting — the port is reopened
+        rather than abandoned, so button and tag input recover on their own
+        instead of needing a Pi reboot. Both physical inputs share this one
+        thread: if it exits, the exhibit goes deaf to the controls while the
+        display and sim clients (a separate Socket.IO path) still look healthy,
+        which is exactly the silent overnight failure this guards against.
+        """
         while self._running:
             try:
                 if self.ser is None or not self.ser.is_open:
-                    break
+                    if not self._reconnect():
+                        continue  # backoff already applied; retry
                 raw = self.ser.readline()
                 if not raw:
                     continue
@@ -115,11 +152,43 @@ class ArduinoRFIDService:
                 self._dispatch(msg)
             except json.JSONDecodeError:
                 logger.debug("Non-JSON from Arduino: %s", line if 'line' in dir() else raw)
-            except serial.SerialException as e:
-                logger.error("Serial read error: %s", e)
-                break
+            except (serial.SerialException, OSError) as e:
+                # OSError covers the device vanishing on USB re-enumeration,
+                # which can surface as a bare OSError rather than SerialException.
+                # Drop the handle and let the loop top reconnect with backoff.
+                logger.error("Serial read error: %s; will attempt to reconnect", e)
+                self._close_serial()
             except Exception as e:
                 logger.error("Reader loop error: %s", e)
+
+    def _reconnect(self):
+        """Reopen the serial port after a failure. Returns True on success.
+
+        Sleeps for the current backoff first (so a permanently unplugged Arduino
+        doesn't spin), then re-detects the port because a re-enumeration can move
+        the Arduino from ttyACM0 to ttyACM1. Backoff grows on each failure up to
+        RECONNECT_BACKOFF_MAX and resets once connected.
+        """
+        time.sleep(min(self._reconnect_backoff, RECONNECT_BACKOFF_MAX))
+        if not self._running:
+            return False
+
+        # Prefer the last known port; fall back to auto-detect if it's gone.
+        port = self.port
+        if port is None or not os.path.exists(port):
+            port = self._detect_port() or port
+
+        if port is not None and self._open_serial(port):
+            logger.info("Arduino serial reconnected on %s", port)
+            # The Uno resets when the port reopens, so its tag state starts empty
+            # and it re-emits a tag event if one is present. Clear our sticky copy
+            # so a tag removed during the outage doesn't linger as present.
+            self.current_tag_uid = None
+            self._reconnect_backoff = RECONNECT_BACKOFF_START
+            return True
+
+        self._reconnect_backoff = min(self._reconnect_backoff * 2, RECONNECT_BACKOFF_MAX)
+        return False
 
     def _dispatch(self, msg):
         """Handle a parsed JSON message from the Arduino."""
