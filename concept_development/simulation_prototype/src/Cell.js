@@ -9,7 +9,9 @@ class Cell {
     this.tissueColor = tissueColor || TISSUE_COLORS.default;
     this.bendingSprings = [];
     this.receptors = [];    // Array of Receptor objects
-    this.receptorNodes = []; // Array of {angle, x, y, pairId} - nodes between adjacent receptors
+    // Nodes between angularly adjacent receptors — the unit binding acts on:
+    // {x, y, angle, color1, color2, pairId, bound, receptor1, receptor2}
+    this.receptorNodes = [];
     this.bound = 0;         // Count of bound particles on this cell
     this.absorbedDrugs = 0; // Count of drug molecules absorbed into this cell
 
@@ -482,8 +484,10 @@ class Cell {
       }
     }
 
-    // 7. Update receptor positions to follow their anchored shape points
+    // 7. Update receptor positions to follow their anchored shape points, then
+    //    re-derive the node midpoints from the tips that just moved.
     this.updateReceptorPositions();
+    this.updateReceptorNodePositions();
   }
 
   // Reposition receptors to follow deformed membrane.  Free receptors sway as damped
@@ -548,6 +552,38 @@ class Cell {
       const ndist = Math.sqrt(ndx * ndx + ndy * ndy) || 1;
       receptor.nx = ndx / ndist;
       receptor.ny = ndy / ndist;
+    }
+  }
+
+  /**
+   * Re-derive receptor node positions from the two receptor tips that define them.
+   * Runs every frame, after updateReceptorPositions() has finished moving the tips —
+   * a node's two receptors are not adjacent in this.receptors, so this cannot be folded
+   * into that loop.
+   *
+   * Without this, nodes keep the midpoints computed once at allocation while the tips
+   * move away underneath them. The dominant cause is the membrane relaxing from its raw
+   * Perlin outline to the spring equilibrium, which measured ~17-21px of permanent
+   * offset on small and tumor cells — comparable to the spriteSize*0.6 radius binding
+   * matches within. Breathing (±2% radius, ~1px) and particle impacts add ongoing
+   * motion on top that never settles.
+   *
+   * Only x/y need refreshing, which is why this is ~4 flops per node with no trig and
+   * no allocation: pairId and the receptor links are fixed at allocation, and node.angle
+   * is never read anywhere.
+   *
+   * Skipping the re-sort assumes receptors keep their angular order. That is not
+   * guaranteed by construction — tips sway independently by up to swayMaxOffset, so
+   * neighbours only stay ordered while their spacing (circumference / receptorCount)
+   * stays comfortably above that. It holds across every non-degenerate cell measured;
+   * reordering appeared only on a membrane that had collapsed to a minEdge/maxEdge of
+   * 0.1. receptor_nodes.test.js pins this, so if a future tuning change packs receptors
+   * tighter or raises sway, that test is what will catch it.
+   */
+  updateReceptorNodePositions() {
+    for (let node of this.receptorNodes) {
+      node.x = (node.receptor1.tipX + node.receptor2.tipX) * 0.5;
+      node.y = (node.receptor1.tipY + node.receptor2.tipY) * 0.5;
     }
   }
 

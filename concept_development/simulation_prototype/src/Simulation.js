@@ -253,6 +253,20 @@ class Simulation {
     if (sprite && typeof sprite.remove === 'function') sprite.remove();
   }
 
+  /**
+   * Permute the designed ligand arrangement for a single particle.
+   *
+   * Deliberate, and it changes binding — not just appearance. Binding matches
+   * *adjacent ligand pairs*, so permuting the slots gives each particle a different
+   * set of pairs to present, and a dose explores many arrangements of the colors the
+   * visitor chose rather than one. Do not "fix" this into a rotation or a verbatim
+   * copy: a rotation preserves the pair multiset and would be a no-op on binding
+   * (the random spawn angle already covers orientation), and a verbatim copy removes
+   * the intended variation.
+   *
+   * Consequence to keep in mind: the visitor's *ordering* does not survive this, so
+   * only the multiset of colors they chose affects outcomes.
+   */
   _randomizeLigandPositions(canonical) {
     const arr = canonical.slice();
     for (let i = arr.length - 1; i > 0; i--) {
@@ -421,7 +435,10 @@ class Simulation {
   }
 
   /**
-   * Handle particle spawning in test mode
+   * Handle particle spawning in test mode.
+   *
+   * Each particle gets its own permutation of the designed arrangement — see
+   * _randomizeLigandPositions for why that is intentional and what it costs.
    */
   updateTestModeSpawning(frameCount) {
     const elapsedFrames = frameCount - this.testStartFrame;
@@ -483,7 +500,7 @@ class Simulation {
       if (nearestCell) {
         this.attempts++;
 
-        // Attempt node-based binding (probabilistic: 85% for 2+ matches, 20% for 1 match)
+        // Attempt node-based binding (deterministic: binds on 1 or more pair matches)
         const result = attemptNodeBinding(
           p,
           nearestCell,
@@ -919,7 +936,7 @@ class Simulation {
     }
     this.ligandPositions = next;
     this.resetSpriteCache();
-    this.theoreticalScore = this.computeTheoreticalScore();
+    this.theoreticalScore = this.computeAffinity();
   }
 
   /**
@@ -944,7 +961,8 @@ class Simulation {
    */
   setDeathThreshold(threshold) {
     this.deathThreshold = threshold;
-    this.theoreticalScore = this.computeTheoreticalScore();
+    // No affinity recompute: the threshold governs how much drug kills a cell,
+    // not how well the drug binds to one.
   }
 
   /**
@@ -961,39 +979,21 @@ class Simulation {
       // Cell count adjusts based on expression level (larger cells = fewer cells)
       this.generateCells();
     }
-    this.theoreticalScore = this.computeTheoreticalScore();
+    this.theoreticalScore = this.computeAffinity();
   }
 
   /**
-   * Compute theoretical score analytically from receptor concentrations and ligand positions.
-   * Represents the binding affinity of the drug for this tissue — the probability that a
-   * random adjacent receptor pair on the cell membrane matches any active ligand pair.
+   * Binding affinity of the drug for this tissue, from the shared model in scoring.js.
    *
-   * matchRate = Σ (r[c1]/totalConc) × (r[c2]/totalConc)  for each active ligand pair (c1, c2)
-   * theoreticalScore = matchRate × 100
-   *
-   * This ranges 0–100% where 100% means every receptor pair on the tissue is compatible
-   * with the drug. It is stable: depends only on tissue receptors and ligand positions,
-   * not on cell layout, deathThreshold, or particle count.
+   * This value leaves the simulation: getStats() puts it on the wire, the dashboard bar
+   * and the Pi display both render it. It must therefore come from the same function the
+   * dashboard calls — an earlier local implementation here disagreed with scoring.js, so
+   * the two screens showed different affinities for the same drug. Depends only on tissue
+   * receptors and ligand positions, never on cell layout, deathThreshold, or particle count.
    */
-  computeTheoreticalScore() {
-    const receptors = this.tissue.receptors;
-
-    const totalConc = receptors.reduce((sum, r) => sum + (r || 0), 0);
-    if (totalConc < 0.01) return 0;
-
-    // Sum match probabilities over all active ligand ordered pairs
-    let matchRate = 0;
-    for (let i = 0; i < 6; i++) {
-      const c1 = this.ligandPositions[(i + 5) % 6];
-      const c2 = this.ligandPositions[i];
-      if (typeof c1 === 'number' && c1 >= 0 && c1 < 6 &&
-          typeof c2 === 'number' && c2 >= 0 && c2 < 6) {
-        matchRate += ((receptors[c1] || 0) / totalConc) * ((receptors[c2] || 0) / totalConc);
-      }
-    }
-
-    return Math.min(100, matchRate * 100);
+  computeAffinity() {
+    if (typeof scoreTissue !== 'function') return 0;
+    return scoreTissue(this.ligandPositions, this.tissue.receptors);
   }
 
   // --- Test Mode Control ---
@@ -1018,7 +1018,7 @@ class Simulation {
     this.triggeredDeaths = 0;
     this.generateCells();
     this.initialCellCount = this.cells.length;
-    this.theoreticalScore = this.computeTheoreticalScore();
+    this.theoreticalScore = this.computeAffinity();
   }
 
   /**
@@ -1043,7 +1043,7 @@ class Simulation {
     this.triggeredDeaths = 0;
     this.generateCells();
     this.initialCellCount = this.cells.length;
-    this.theoreticalScore = this.computeTheoreticalScore();
+    this.theoreticalScore = this.computeAffinity();
   }
 
   // --- Statistics ---

@@ -1,14 +1,19 @@
-// scoring.js — Adjacency-aware combinatorial probability scoring
+// scoring.js — Adjacency-aware scoring for node-based binding
 //
-// Calculates the theoretical binding probability based on:
-// 1. The particle's ligand configuration (which colors are in which positions)
+// scoreTissue is the single source of truth for "Binding Affinity": the dashboard
+// bar, the Pi display, and Simulation.getStats() all read this one model. Do not add
+// a second implementation elsewhere — two of them disagreeing is what this replaced.
+//
+// It calculates affinity from:
+// 1. The multiset of colors in the particle's ligand configuration
 // 2. The tissue's receptor concentrations (probability of each color being present)
-// 3. Probabilistic binding based on match count:
-//    - 2+ ordered matching pairs: 85% bind probability
-//    - 1 matching pair: 20% bind probability
+// 3. The simulation's deterministic rule: a collision binds when at least one
+//    ordered ligand pair on the leading edge matches an adjacent receptor pair
 //
-// The model considers all 6 possible collision orientations and computes
-// the expected binding probability using the adjacency matching system.
+// Because Simulation permutes the arrangement per particle, the live model
+// (scoreTissueNodes) averages over arrangements in closed form instead of enumerating
+// collision orientations. The order- and orientation-dependent models further down are
+// unreferenced and kept only for reference.
 
 // Define the 6 possible leading edges (each contains 3 adjacent ligand indices)
 // These correspond to the 6 possible collision orientations of the hexagonal particle
@@ -167,18 +172,6 @@ function scoreTissueAdjacency(ligandPositions, receptors, threshold = 2) {
   return (totalProbability / LEADING_EDGES.length) * 100;
 }
 
-// Define the 6 possible leading edge node sets
-// Each contains the 2-3 vertex node indices that would be on the leading edge for that orientation
-// Vertex i is at angle -π/2 + i*π/3, so vertices are at top, upper-right, lower-right, bottom, lower-left, upper-left
-const LEADING_EDGE_NODES = [
-  [5, 0, 1],  // Collision from top-right: vertices 5, 0, 1 face inward
-  [0, 1, 2],  // Collision from right: vertices 0, 1, 2 face inward
-  [1, 2, 3],  // Collision from bottom-right
-  [2, 3, 4],  // Collision from bottom-left
-  [3, 4, 5],  // Collision from left
-  [4, 5, 0]   // Collision from top-left
-];
-
 /**
  * Calculate probability of exactly k successes for independent Bernoulli trials
  * @param {number[]} probs - Array of success probabilities for each trial
@@ -211,82 +204,54 @@ function probabilityOfExactlyK(probs, k) {
 }
 
 /**
- * Node-Based Combinatorial Probability scoring model
+ * Node-based scoring, averaged over ligand arrangements. This is the live model.
  *
- * Calculates the theoretical binding probability for deterministic node-based binding:
- * 1. Compute particle vertex nodes (ordered pairs between adjacent ligands)
- * 2. For each collision orientation, determine which nodes are on leading edge
- * 3. Calculate probability of finding at least 1 matching receptor node pair
- * 4. Average across all 6 orientations
+ * Binding acts on *adjacent ligand pairs* (nodes), and Simulation permutes the designed
+ * arrangement for every particle, so a dose samples all orderings of the colors the
+ * visitor chose rather than the single one shown in the preview. This returns the
+ * expectation over that permutation, which makes it order-independent by construction —
+ * exactly like the simulation it models. That is also why no collision-orientation loop
+ * is needed: once slot order is uniformly random, all six orientations are equivalent.
+ *
+ * Let f_i = r[L_i] / totalConc be the chance a random membrane receptor matches the
+ * ligand in slot i (0 for an empty slot). Under a uniform permutation each of the 6
+ * nodes presents a uniformly random ordered pair of distinct slots, so
+ *
+ *   E[matching pairs] = 6 · (Σ_{i≠j} f_i·f_j) / (6·5) = ((Σf)² − Σf²) / 5
+ *
+ * The result is an expected count of matching pairs per particle, scaled to a 0–100
+ * bar — it is an affinity, not a per-collision probability. A single filled slot scores
+ * 0, matching the simulation's rule that a node needs both of its ligands present.
  *
  * @param {number[]} ligandPositions - Array of 6 ligand colors (-1 to 5, -1 = empty)
  * @param {number[]} receptors - Array of 6 receptor concentrations (0 to 1)
- * @param {number} threshold - Minimum node matches required (default 1)
  * @returns {number} Theoretical binding percentage (0-100)
  */
-function scoreTissueNodes(ligandPositions, receptors, threshold = 1) {
+function scoreTissueNodes(ligandPositions, receptors) {
   if (!ligandPositions || !receptors) return 0;
 
-  // Compute particle node pairs for all 6 vertices
-  // Node i is between ligand (i+5)%6 and ligand i
-  const particleNodes = [];
-  for (let i = 0; i < 6; i++) {
-    const leftIdx = (i + 5) % 6;
-    const rightIdx = i;
-    const color1 = ligandPositions[leftIdx];
-    const color2 = ligandPositions[rightIdx];
-
-    // Node is only active if both adjacent ligands are present
-    const active = (typeof color1 === 'number' && color1 >= 0 && color1 < 6) &&
-                   (typeof color2 === 'number' && color2 >= 0 && color2 < 6);
-
-    particleNodes.push({
-      index: i,
-      color1: active ? color1 : -1,
-      color2: active ? color2 : -1,
-      active: active
-    });
-  }
-
-  // Count active nodes
-  const activeCount = particleNodes.filter(n => n.active).length;
-  if (activeCount < threshold) return 0;
-
-  // Calculate total receptor concentration for normalization
+  // Total receptor concentration, for normalization
   let totalConc = 0;
   for (let c = 0; c < 6; c++) {
     totalConc += receptors[c] || 0;
   }
   if (totalConc < 0.01) return 0;  // No receptors
 
-  // Calculate binding probability for each orientation
-  let totalProbability = 0;
+  // Per-slot match chance; empty slots contribute nothing
+  let sum = 0;
+  let sumSquares = 0;
+  for (let i = 0; i < 6; i++) {
+    const color = ligandPositions[i];
+    if (!(typeof color === 'number' && color >= 0 && color < 6)) continue;
 
-  for (let edge of LEADING_EDGE_NODES) {
-    // Get the particle nodes on this leading edge
-    const leadingNodes = edge.map(i => particleNodes[i]).filter(n => n.active);
-
-    if (leadingNodes.length === 0) {
-      continue;
-    }
-
-    // Calculate probability of finding matching receptor node pair for each node
-    const matchProbs = leadingNodes.map(node => {
-      const cA = receptors[node.color1] || 0;
-      const cB = receptors[node.color2] || 0;
-      const pairProbability = cA * cB;
-      const avgReceptors = totalConc * 20;
-      const coverageFactor = Math.min(1, avgReceptors / 10);
-      return Math.min(1, pairProbability * coverageFactor);
-    });
-
-    // Calculate P(at least threshold matches)
-    const edgeProb = probabilityOfKOrMore(matchProbs, threshold);
-    totalProbability += edgeProb;
+    const f = (receptors[color] || 0) / totalConc;
+    sum += f;
+    sumSquares += f * f;
   }
 
-  // Average across all 6 orientations, convert to percentage
-  return (totalProbability / LEADING_EDGE_NODES.length) * 100;
+  const expectedMatches = (sum * sum - sumSquares) / 5;
+
+  return Math.min(100, Math.max(0, expectedMatches * 100));
 }
 
 
@@ -319,9 +284,9 @@ function scoreTissueLegacy(ligandCounts, receptors) {
  * For backward compatibility, it also accepts ligandCounts (array of 6 counts),
  * but this is detected by checking if any value > 5 (which can't be a valid position).
  *
- * Binding probabilities are built into the model:
- * - 2+ ordered matching pairs: 85% bind probability
- * - 1 matching pair: 20% bind probability
+ * Delegates to scoreTissueNodes, which averages over the per-particle arrangement
+ * permutation. The result is an affinity — the expected number of matching ligand/
+ * receptor pairs per particle on a 0–100 scale — not a per-collision bind probability.
  *
  * @param {number[]} ligandPositions - Array of 6 ligand colors (-1 to 5)
  * @param {number[]} receptors - Array of 6 receptor concentrations (0 to 1)
@@ -375,4 +340,3 @@ window.probabilityOfKOrMore = probabilityOfKOrMore;
 window.probabilityOfExactlyK = probabilityOfExactlyK;
 window.edgeBindingProbability = edgeBindingProbability;
 window.LEADING_EDGES = LEADING_EDGES;
-window.LEADING_EDGE_NODES = LEADING_EDGE_NODES;

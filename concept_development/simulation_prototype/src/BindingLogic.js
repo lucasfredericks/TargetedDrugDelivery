@@ -219,6 +219,29 @@ function getLeadingEdgeNodes(particle, cell, particleNodes) {
 }
 
 /**
+ * A receptor can serve only one ligand at a time: bound/latched while a drug is
+ * attached, refractory while it recovers after the drug is absorbed.
+ */
+function isReceptorFree(receptor) {
+  return !receptor.bound && !receptor.latched && !receptor.refractory;
+}
+
+/**
+ * A cell node is available only if it is unbound AND both of its receptors are free.
+ * Adjacent nodes share a receptor, so testing node.bound alone would let a second
+ * particle claim a neighboring node whose receptors are already spent — the same
+ * receptor would be counted twice and its latched ligand color overwritten.
+ *
+ * @param {Object} cNode - Cell receptor node
+ * @param {Set} usedReceptors - Receptors already claimed within the current attempt
+ */
+function isCellNodeAvailable(cNode, usedReceptors) {
+  if (cNode.bound) return false;
+  if (usedReceptors.has(cNode.receptor1) || usedReceptors.has(cNode.receptor2)) return false;
+  return isReceptorFree(cNode.receptor1) && isReceptorFree(cNode.receptor2);
+}
+
+/**
  * Attempt node-based binding between particle and cell.
  * Binding is deterministic: succeeds if at least 1 ordered pair matches.
  *
@@ -237,22 +260,21 @@ function attemptNodeBinding(particle, cell, ligandPositions, spriteSize) {
   // Find nodes on the leading edge
   const leadingNodes = getLeadingEdgeNodes(particle, cell, particleNodes);
 
-  // Try to match leading particle nodes with cell receptor nodes
+  // Try to match leading particle nodes with cell receptor nodes.
+  // Claimed receptors are tracked (not just claimed nodes) so that two leading
+  // nodes matching adjacent cell nodes cannot share a receptor between them.
   let nodeMatches = 0;
   const matchedParticleNodes = [];
   const matchedCellNodes = [];
-  const usedCellNodes = new Set();
+  const usedReceptors = new Set();
 
   for (let pNode of leadingNodes) {
-    // Find nearest unbound cell node with matching pair identity
+    // Find nearest available cell node with matching pair identity
     let bestCellNode = null;
     let bestDist = Infinity;
 
-    for (let i = 0; i < cell.receptorNodes.length; i++) {
-      const cNode = cell.receptorNodes[i];
-
-      if (cNode.bound) continue;
-      if (usedCellNodes.has(i)) continue;
+    for (let cNode of cell.receptorNodes) {
+      if (!isCellNodeAvailable(cNode, usedReceptors)) continue;
 
       // Check if pair identity matches exactly
       if (cNode.pairId !== pNode.pairId) continue;
@@ -263,15 +285,16 @@ function attemptNodeBinding(particle, cell, ligandPositions, spriteSize) {
 
       if (dist < matchRadius && dist < bestDist) {
         bestDist = dist;
-        bestCellNode = { node: cNode, index: i };
+        bestCellNode = cNode;
       }
     }
 
     if (bestCellNode) {
       nodeMatches++;
       matchedParticleNodes.push(pNode);
-      matchedCellNodes.push(bestCellNode.node);
-      usedCellNodes.add(bestCellNode.index);
+      matchedCellNodes.push(bestCellNode);
+      usedReceptors.add(bestCellNode.receptor1);
+      usedReceptors.add(bestCellNode.receptor2);
     }
   }
 
@@ -289,7 +312,8 @@ function attemptNodeBinding(particle, cell, ligandPositions, spriteSize) {
 }
 
 // =============================================================================
-// LEGACY PROBABILISTIC SYSTEM (kept for reference/fallback)
+// LEGACY PROBABILISTIC SYSTEM (unreferenced — kept for reference only; nothing
+// falls back to it, and fidelity/toxicity no longer influence binding)
 // =============================================================================
 
 // Calculate binding probability for a particle based on ligand-receptor match
@@ -410,6 +434,8 @@ window.countAdjacentMatches = countAdjacentMatches;
 window.attemptAdjacencyBinding = attemptAdjacencyBinding;
 window.getParticleNodes = getParticleNodes;
 window.getLeadingEdgeNodes = getLeadingEdgeNodes;
+window.isReceptorFree = isReceptorFree;
+window.isCellNodeAvailable = isCellNodeAvailable;
 window.attemptNodeBinding = attemptNodeBinding;
 window.bindingProbabilityForParticle = bindingProbabilityForParticle;
 window.hasMatchingReceptors = hasMatchingReceptors;
