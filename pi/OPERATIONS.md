@@ -219,6 +219,12 @@ Snapshots are per-hostname, so more than one device can share the branch.
 will not overwrite good state with junk; `--force` overrides. `restore` leaves
 the file it replaced beside the original as `.bak-<timestamp>`.
 
+A `save --push` that fails to reach origin still commits locally, and the next
+`save --push` notices the outstanding snapshots and retries the push — so
+fixing the credentials and re-running the same command is all that is needed.
+`installation_config.py status` reports how many snapshots have not reached
+origin.
+
 `--push` needs the Pi to have write access to the repository. GitHub no longer
 accepts passwords, so that means an SSH deploy key with the write box ticked —
 see SETUP.md, "Step 0: Git Access". Without it `save` still commits the

@@ -82,6 +82,91 @@ def git_ok(*args, cwd=None):
     ).returncode == 0
 
 
+def git_try(*args, cwd=None):
+    """Run git, returning (ok, combined output). For calls allowed to fail."""
+    proc = subprocess.run(
+        ("git",) + args, cwd=cwd, check=False, text=True, encoding="utf-8",
+        input="", env=_git_env(),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    return proc.returncode == 0, (proc.stdout or "").strip()
+
+
+AUTH_MARKERS = (
+    "authentication failed", "could not read username", "could not read password",
+    "terminal prompts disabled", "permission denied (publickey)",
+    "invalid username or password", "support for password authentication",
+    "403 forbidden", "access denied",
+)
+
+
+def looks_like_auth_failure(text):
+    low = (text or "").lower()
+    return any(m in low for m in AUTH_MARKERS)
+
+
+def print_auth_hint(root, wt=None):
+    """Explain how to give git credentials it can actually use."""
+    url = git("remote", "get-url", "origin", cwd=root, check=False)
+    print("  Remote: {}".format(url or "(none configured)"))
+    if url.startswith("https://"):
+        print("  That is an HTTPS remote. These scripts run git with prompting")
+        print("  disabled -- otherwise an unattended Pi hangs forever on an")
+        print("  invisible password prompt -- so git cannot ask you for a token.")
+        print("  Store the credential once, from a shell where git CAN prompt:")
+        print()
+        print("      git config --global credential.helper store")
+        if wt:
+            print("      git -C {} push -u origin {}".format(wt, STATE_BRANCH))
+        else:
+            print("      git push")
+        print()
+        print("  Enter your username and paste the token as the password. It is")
+        print("  saved in plaintext to ~/.git-credentials, so use a repo-scoped")
+        print("  token, never an account password.")
+    print("  A deploy key avoids the storage and expiry problems entirely --")
+    print("  see SETUP.md, 'Step 0: Git Access'.")
+
+
+def unpushed_commits(root, wt):
+    """How many commits on the local state branch are not yet on origin."""
+    if not has_origin(root):
+        return 0
+    if not git_ok("rev-parse", "--verify", "--quiet",
+                  "refs/remotes/origin/" + STATE_BRANCH, cwd=wt):
+        # Never pushed, so every commit on the branch is outstanding.
+        out = git("rev-list", "--count", STATE_BRANCH, cwd=wt, check=False)
+        return int(out) if out.isdigit() else 1
+    out = git("rev-list", "--count",
+              "origin/{}..{}".format(STATE_BRANCH, STATE_BRANCH),
+              cwd=wt, check=False)
+    return int(out) if out.isdigit() else 0
+
+
+def push_state(root, wt):
+    """Push the state branch to origin. Returns a process exit code."""
+    if not has_origin(root):
+        print("No 'origin' remote configured -- the snapshot is local only.")
+        return 1
+    ok, out = git_try("push", "-u", "origin", STATE_BRANCH, cwd=wt)
+    if ok:
+        print("Pushed to origin/{}.".format(STATE_BRANCH))
+        return 0
+    print("The snapshot is committed on this device, but the push failed:")
+    for line in (out or "").splitlines()[:4]:
+        print("  " + line)
+    print()
+    print("It is safe here and survives a reboot -- but not a reimage, until it")
+    print("reaches origin.")
+    print()
+    if looks_like_auth_failure(out):
+        print_auth_hint(root, wt)
+    else:
+        print("  Retry with: git -C {} push -u origin {}".format(wt, STATE_BRANCH))
+    return 1
+
+
+
 def repo_root():
     return os.path.normpath(git("rev-parse", "--show-toplevel",
                                 cwd=os.path.dirname(os.path.abspath(__file__))))
@@ -219,14 +304,25 @@ def sync_worktree(root, wt):
     """Best-effort pull of the state branch, so we snapshot onto current history."""
     if not has_origin(root):
         return
-    if not git_ok("fetch", "origin", STATE_BRANCH, cwd=wt):
-        print("  (offline or no remote branch yet -- working locally)")
+    ok, out = git_try("fetch", "origin", STATE_BRANCH, cwd=wt)
+    if not ok:
+        low = (out or "").lower()
+        if looks_like_auth_failure(out):
+            print("  Could not reach origin: authentication failed.")
+            print_auth_hint(root, wt)
+        elif "couldn't find remote ref" in low or "does not appear to be" in low:
+            print("  (no {} branch on origin yet -- push will create it)".format(
+                STATE_BRANCH))
+        else:
+            first = (out or "unknown error").splitlines()[0]
+            print("  Could not reach origin, working locally: {}".format(first))
         return
     if git_ok("rev-parse", "--verify", "--quiet",
               "refs/remotes/origin/" + STATE_BRANCH, cwd=wt):
         if not git_ok("merge", "--ff-only", "origin/" + STATE_BRANCH, cwd=wt):
             print("  WARNING: local {} has diverged from origin. Resolve it in "
                   "{} before pushing.".format(STATE_BRANCH, wt))
+
 
 
 # --- commands ---
@@ -280,6 +376,18 @@ def cmd_save(args):
     git("add", "-A", cwd=wt)
     if git_ok("diff", "--cached", "--quiet", cwd=wt):
         print("No changes -- the snapshot for {} is already current.".format(host))
+        # Still push if anything is outstanding. An earlier save may have
+        # committed and then failed to push (expired token, Pi offline);
+        # without this, that snapshot sits unpushed forever, because every
+        # later save takes this same branch and returns early.
+        outstanding = unpushed_commits(root, wt)
+        if outstanding:
+            if args.push:
+                print("{} earlier snapshot(s) never reached origin -- pushing now.".format(outstanding))
+                return push_state(root, wt)
+            print("But {} snapshot(s) have never reached origin. Push with:"
+                  .format(outstanding))
+            print("  python installation_config.py save --push")
         return 0
 
     with open(os.path.join(dest, "manifest.json"), "w", newline="\n") as f:
@@ -295,28 +403,11 @@ def cmd_save(args):
         print("  " + rel)
 
     if args.push:
-        if not has_origin(root):
-            print("No 'origin' remote configured -- snapshot is local only.")
-            return 1
-        try:
-            git("push", "-u", "origin", STATE_BRANCH, cwd=wt)
-        except RuntimeError as e:
-            print("The snapshot is committed on this device, but the push failed:")
-            print("  {}".format(e))
-            print()
-            print("It is safe here and will survive a reboot -- but not a")
-            print("reimage, until it reaches origin. If this is an "
-                  "authentication")
-            print("failure, GitHub no longer accepts passwords; the Pi needs a")
-            print("deploy key. See SETUP.md, 'Step 0: Git Access'.")
-            print()
-            print("Retry with: git -C {} push -u origin {}".format(
-                wt, STATE_BRANCH))
-            return 1
-        print("Pushed to origin/{}.".format(STATE_BRANCH))
-    else:
-        print("\nNot pushed. To back it up off this device:")
-        print("  git -C {} push -u origin {}".format(wt, STATE_BRANCH))
+        return push_state(root, wt)
+
+    print()
+    print("Not pushed. To back it up off this device:")
+    print("  python installation_config.py save --push")
     return 0
 
 

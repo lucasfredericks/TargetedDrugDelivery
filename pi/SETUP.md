@@ -97,19 +97,32 @@ read-only".
 ### If you would rather not give the Pi write access
 
 Use a fine-grained personal access token limited to this one repository with
-Contents: read and write, and let git remember it:
+Contents: read and write.
+
+Generating the token is not enough on its own -- git has to be told to keep it.
+The scripts deliberately run git with prompting disabled, so they can never ask
+you for it; you have to store it once by hand, from a shell where git *can*
+prompt:
 
     git config --global credential.helper store
-    git pull        # paste the token as the password, once
+
+    cd ~/TargetedDrugDelivery
+    git push                    # username, then paste the token as the password
+
+That first push is the one that captures the credential. Afterwards
+`installation_config.py save --push` works unattended. If the state branch has
+never been pushed, run the capture against its worktree instead:
+
+    git -C ~/TargetedDrugDelivery-installation-state push -u origin installation-state
 
 Two tradeoffs. Tokens expire, and when one does the exhibit quietly stops
 backing up its state -- a deploy key does not expire. And the token is written
 in plaintext to ~/.git-credentials, so it must be a repo-scoped token, never an
 account password.
 
-The scripts run git with prompting disabled, so a missing or expired
-credential fails immediately with a message rather than hanging the Pi on an
-invisible password prompt.
+Because prompting is disabled inside the scripts, a missing or expired
+credential fails immediately with an explanation rather than hanging the Pi on
+an invisible password prompt.
 
 
 Step 1: Enable I2C on the Pi
