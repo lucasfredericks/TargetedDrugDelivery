@@ -200,7 +200,12 @@ Test a single channel:
 Step 6: Calibrate Color Sensors
 -------------------------------
 
-The sensors need to be calibrated for your specific ligand pieces and
+If you are rebuilding a Pi that was calibrated before, you do not need to
+recalibrate — restore the snapshot instead and skip to Step 7:
+
+    python installation_config.py restore
+
+Otherwise the sensors need to be calibrated for your specific ligand pieces and
 lighting conditions. Run the calibration utility:
 
     python color_calibration.py
@@ -214,6 +219,15 @@ Results are saved to color_map.json. Re-run calibration if you change:
 - The physical ligand pieces (different material or paint)
 - The sensor mounting distance or angle
 - The lighting conditions (LEDs, shrouds, ambient light)
+
+color_map.json is gitignored installation state, so it belongs to this device
+and nothing in git will overwrite it — but nothing in git is backing it up
+either. Snapshot it as soon as the calibration is good:
+
+    python installation_config.py save --push
+
+Skip that and the calibration exists only on this SD card. See OPERATIONS.md,
+"Installation state".
 
 
 Step 7: Register RFID Tags
@@ -245,6 +259,12 @@ puzzles/puzzle-example-01.json as a template.
 5. Repeat for each tag. All current mappings are shown in the table at the
    bottom of the page. Use the "Remove" button to delete a mapping.
 
+6. Snapshot the pairings once they are all in. Like the calibration,
+   puzzles/index.json is gitignored installation state and is not backed up
+   until you say so:
+
+       python installation_config.py save --push
+
 ### Manual Editing (Alternative)
 
 You can also edit puzzles/index.json directly:
@@ -254,7 +274,13 @@ You can also edit puzzles/index.json directly:
       "11:22:33:44": "puzzle-hard-02.json"
     }
 
-Restart the master server after manual edits for changes to take effect.
+Restart the master server after manual edits for changes to take effect, then
+run `python installation_config.py save --push`.
+
+If this is a rebuild of a Pi that was already paired, restore the previous
+mappings rather than re-pairing every card:
+
+    python installation_config.py restore
 
 
 Step 8: Network Setup

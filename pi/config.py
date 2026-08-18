@@ -44,9 +44,16 @@ COLOR_YELLOW = 5
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# color_map.json and puzzles/index.json are installation state: generated on
+# this device by color_calibration.py and the /admin tag pairing UI, gitignored
+# so no pull or branch switch can touch them, and snapshotted to the
+# installation-state branch by installation_config.py. The .example files are
+# tracked placeholders that let a fresh clone boot.
 COLOR_MAP_PATH = os.path.join(BASE_DIR, "color_map.json")
+COLOR_MAP_EXAMPLE_PATH = COLOR_MAP_PATH + ".example"
 PUZZLES_DIR = os.path.join(BASE_DIR, "puzzles")
 PUZZLES_INDEX_PATH = os.path.join(PUZZLES_DIR, "index.json")
+PUZZLES_INDEX_EXAMPLE_PATH = PUZZLES_INDEX_PATH + ".example"
 
 # Simulation defaults
 DEFAULT_PARTICLE_COUNT = 1000

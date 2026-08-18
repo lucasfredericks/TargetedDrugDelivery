@@ -17,7 +17,8 @@ import adafruit_tca9548a
 from adafruit_apds9960.apds9960 import APDS9960
 
 from config import (
-    MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH, COLOR_NONE,
+    MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH,
+    COLOR_MAP_EXAMPLE_PATH, COLOR_NONE,
     COLOR_GAIN, COLOR_INTEGRATION_TIME, COLOR_READ_TIMEOUT
 )
 
@@ -61,15 +62,38 @@ class SensorService:
                 self.sensors.append(None)
 
     def _load_color_map(self):
-        """Load per-sensor color reference values from color_map.json."""
-        with open(COLOR_MAP_PATH, "r") as f:
-            data = json.load(f)
+        """Load per-sensor color reference values from color_map.json.
+
+        color_map.json is installation state: it is gitignored and produced by
+        color_calibration.py on this specific device, so a fresh clone or a
+        reimaged card will not have one. Rather than refuse to start -- which
+        would also lock you out of the admin dashboard -- fall back to the
+        tracked example so the exhibit boots, and say so loudly. Colors will
+        match badly until the real calibration is restored
+        (installation_config.py restore) or re-run (color_calibration.py).
+        """
+        data = self._read_color_map_file(COLOR_MAP_PATH)
+
+        if data is None or "sensors" not in data:
+            why = "not found" if data is None else "has no 'sensors' key"
+            fallback = self._read_color_map_file(COLOR_MAP_EXAMPLE_PATH)
+            if fallback is None or "sensors" not in fallback:
+                logger.error(
+                    "color_map.json %s at %s and the example fallback at %s is "
+                    "missing or unusable — no color matching is possible. "
+                    "Run color_calibration.py.",
+                    why, COLOR_MAP_PATH, COLOR_MAP_EXAMPLE_PATH)
+                self.sensor_color_maps = {}
+                return
+            logger.warning(
+                "USING EXAMPLE COLOR CALIBRATION — color_map.json %s at %s. "
+                "Colors will be matched badly. Restore this device's "
+                "calibration with 'python installation_config.py restore', or "
+                "re-run color_calibration.py.",
+                why, COLOR_MAP_PATH)
+            data = fallback
 
         self.sensor_color_maps = {}
-        if "sensors" not in data:
-            logger.warning("color_map.json missing 'sensors' key — "
-                           "run color_calibration.py to generate it")
-            return
 
         self.clear_max = {}
         for ch_str, val in data.get("clear_max", {}).items():
@@ -89,6 +113,18 @@ class SensorService:
 
         logger.info("Loaded per-sensor color maps for %d sensors",
                      len(self.sensor_color_maps))
+
+    @staticmethod
+    def _read_color_map_file(path):
+        """Return parsed JSON from *path*, or None if absent or unreadable."""
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as e:
+            logger.error("Could not read color map %s: %s", path, e)
+            return None
 
     def read_raw(self, channel):
         """Read raw RGBC values from a single sensor channel.

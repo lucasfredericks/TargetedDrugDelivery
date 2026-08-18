@@ -1,0 +1,4 @@
+{
+  "_comment": "EXAMPLE ONLY. The live index.json is gitignored installation state -- it maps the RFID tag UIDs of your physical cards to puzzle files. Pair tags at http://<pi-ip>:5000/admin, then run 'python installation_config.py save'. See OPERATIONS.md, 'Installation state'.",
+  "_example": "\"AA:BB:CC:DD\": \"puzzle-example-01.json\""
+}

@@ -1,4 +1,0 @@
-{
-  "_comment": "Map RFID tag UIDs to puzzle filenames. Scan a tag to get its UID, then add an entry here.",
-  "_example": "\"123456789\": \"puzzle-example-01.json\""
-}

@@ -21,6 +21,8 @@ display.
 | Open, close, and run the exhibit day to day | [pi/OPERATIONS.md](../pi/OPERATIONS.md) |
 | Fix something that's misbehaving | [pi/OPERATIONS.md](../pi/OPERATIONS.md) → "When something goes wrong" |
 | Deploy a code change to a running exhibit | [pi/OPERATIONS.md](../pi/OPERATIONS.md) → "Deploying a change" |
+| Try a branch on the Pi without losing calibration | [pi/OPERATIONS.md](../pi/OPERATIONS.md) → "Trying a branch on the Pi" |
+| Back up or restore calibration and tag pairings | [pi/OPERATIONS.md](../pi/OPERATIONS.md) → "Installation state" |
 | Work on the simulation code itself | [concept_development/simulation_prototype/README.md](../concept_development/simulation_prototype/README.md) |
 
 ## Reading order (first-time install)
