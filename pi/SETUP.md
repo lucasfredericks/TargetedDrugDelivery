@@ -329,6 +329,25 @@ Results are saved to color_map.json. Re-run calibration if you change:
 - The sensor mounting distance or angle
 - The lighting conditions (LEDs, shrouds, ambient light)
 
+Watch the end of the run for a saturation warning. If a sensor's clear channel
+hits its ceiling (1024 x COLOR_INTEGRATION_TIME counts, so 16384 at the default
+16 cycles), that slot receives more light than the ADC can represent. The
+utility says which colors clipped: a single clipped color is mild, most of them
+means brightness carries no information on that slot and colors are matched on
+hue alone.
+
+The fix is the light -- shroud, mounting height, ambient leak -- because that
+keeps all six sensors on identical settings. If that is not practical,
+COLOR_GAIN in config.py accepts a list of one value per sensor, so a single
+bright slot can be turned down on its own:
+
+    COLOR_GAIN = [1, 1, 1, 0, 0, 1]   # 1x on channels 3 and 4, 4x elsewhere
+
+That is safe because every calibrated reference and both matching features are
+normalized per sensor. Recalibrate after changing it -- gain sets the raw scale.
+Do not reach for COLOR_INTEGRATION_TIME instead: the ADC ceiling scales with it
+too, so lowering it costs resolution without reducing saturation.
+
 color_map.json is gitignored installation state, so it belongs to this device
 and nothing in git will overwrite it — but nothing in git is backing it up
 either. Snapshot it as soon as the calibration is good:

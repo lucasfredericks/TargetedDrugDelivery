@@ -94,6 +94,17 @@ What the lines mean:
   period, so the test continued. Visitors saw nothing. Frequent pairs mean the
   underlying disconnects are still happening, just no longer breaking runs.
 - `Gave up on ...: no reconnect within 15s` — a screen really was gone.
+- `USING EXAMPLE COLOR CALIBRATION` — this device has no color_map.json, so
+  the sensors are running on the tracked placeholder and colors will match
+  badly. Restore it: `python installation_config.py restore`. Expected on a
+  fresh clone or a reimage, never on a working exhibit.
+- `COLOR MAP / CONFIG MISMATCH` — the calibration was taken at a different
+  gain or integration time than config.py now sets. Those change the raw RGBC
+  scale, so every reference value in the map is off. Re-run
+  `color_calibration.py`.
+- `color_map.json records no gain/integration settings` — the calibration
+  predates those being recorded, so the check above cannot run. Harmless in
+  itself; clears the next time you calibrate.
 
 ### Keeping logs across a reboot
 
