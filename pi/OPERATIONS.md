@@ -219,6 +219,12 @@ Snapshots are per-hostname, so more than one device can share the branch.
 will not overwrite good state with junk; `--force` overrides. `restore` leaves
 the file it replaced beside the original as `.bak-<timestamp>`.
 
+`--push` needs the Pi to have write access to the repository. GitHub no longer
+accepts passwords, so that means an SSH deploy key with the write box ticked —
+see SETUP.md, "Step 0: Git Access". Without it `save` still commits the
+snapshot locally and tells you the push failed; the state survives a reboot but
+not a reimage until it reaches origin.
+
 **Run `save` after every calibration and every tag pairing.** Nothing does it
 for you, and until you do, the change exists only on that SD card.
 

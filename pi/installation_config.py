@@ -46,11 +46,25 @@ STATE_FILES = ("pi/color_map.json", "pi/puzzles/index.json")
 
 # --- git plumbing ---
 
+def _git_env():
+    """Environment for every git call, with interactive prompting disabled.
+
+    These run unattended on the exhibit Pi, often over SSH. If git stops to ask
+    for a username and password it hangs forever rather than failing -- and
+    GitHub rejects passwords anyway. Authentication is expected to come from a
+    deploy key; see SETUP.md, "Step 0: Git Access".
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    return env
+
+
 def git(*args, cwd=None, check=True, stdin=None):
     """Run a git command and return its stdout, stripped."""
     proc = subprocess.run(
         ("git",) + args, cwd=cwd, check=False, text=True, encoding="utf-8",
-        input=("" if stdin is None else stdin),
+        input=("" if stdin is None else stdin), env=_git_env(),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if check and proc.returncode != 0:
@@ -63,6 +77,7 @@ def git_ok(*args, cwd=None):
     """True if the git command exits zero."""
     return subprocess.run(
         ("git",) + args, cwd=cwd, check=False, stdin=subprocess.DEVNULL,
+        env=_git_env(),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     ).returncode == 0
 
@@ -283,7 +298,21 @@ def cmd_save(args):
         if not has_origin(root):
             print("No 'origin' remote configured -- snapshot is local only.")
             return 1
-        git("push", "-u", "origin", STATE_BRANCH, cwd=wt)
+        try:
+            git("push", "-u", "origin", STATE_BRANCH, cwd=wt)
+        except RuntimeError as e:
+            print("The snapshot is committed on this device, but the push failed:")
+            print("  {}".format(e))
+            print()
+            print("It is safe here and will survive a reboot -- but not a")
+            print("reimage, until it reaches origin. If this is an "
+                  "authentication")
+            print("failure, GitHub no longer accepts passwords; the Pi needs a")
+            print("deploy key. See SETUP.md, 'Step 0: Git Access'.")
+            print()
+            print("Retry with: git -C {} push -u origin {}".format(
+                wt, STATE_BRANCH))
+            return 1
         print("Pushed to origin/{}.".format(STATE_BRANCH))
     else:
         print("\nNot pushed. To back it up off this device:")
