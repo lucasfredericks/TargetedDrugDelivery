@@ -81,14 +81,32 @@ own -- all of which is what you want for a machine sitting in a gallery.
        cd ~/TargetedDrugDelivery
        git remote set-url origin git@github.com:lucasfredericks/TargetedDrugDelivery.git
 
-5. Confirm it works. The greeting names the repository, not your account --
-   that is what a deploy key looks like:
+5. Confirm it works, and do it interactively -- this run is what accepts
+   GitHub's host key into ~/.ssh/known_hosts. It matters: the scripts run ssh
+   with BatchMode, so an unrecognised host key is a hard "Host key
+   verification failed" rather than a prompt they can answer. Do this once by
+   hand and the problem never appears.
 
        ssh -T git@github.com
+
+   Answer `yes` to the fingerprint prompt, after checking it against the
+   fingerprints GitHub publishes at
+   https://docs.github.com/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+
+   The greeting names the repository, not your account -- that is what a
+   deploy key looks like:
+
        # Hi lucasfredericks/TargetedDrugDelivery! You've successfully
        # authenticated, but GitHub does not provide shell access.
 
+   Then check git itself:
+
        cd ~/TargetedDrugDelivery && git pull
+
+6. If you are moving over from a token, drop the stored credential so git
+   cannot quietly keep using it, and revoke the token on GitHub:
+
+       printf 'protocol=https\nhost=github.com\n' | git credential reject
 
 Do all of this with the read-only overlay disabled, or ~/.ssh will not survive
 the next reboot. See OPERATIONS.md, "Making changes when the root is
