@@ -14,21 +14,57 @@ NUM_SENSORS = 6
 
 # APDS-9960 color sensing settings
 # color_gain: 0=1x, 1=4x, 2=16x, 3=64x
+#
+# One value applies to every sensor. A list of NUM_SENSORS values sets each
+# sensor separately, for a slot that receives more light than the rest and rails
+# its clear channel. That is safe here because every calibrated reference and
+# both match features are normalized per sensor (see sensor_service:
+# normalize_by_clear divides by clear, scale_clear divides by that channel's own
+# clear_max) and nothing ever compares brightness between sensors. Prefer
+# fixing the light -- shroud, mounting height, ambient leak -- since the gain
+# steps are coarse (4x apart) and uniform sensors are easier to reason about.
+#
+#     COLOR_GAIN = 1                    # 4x on all six
+#     COLOR_GAIN = [1, 1, 1, 0, 0, 1]   # 1x on channels 3 and 4
 COLOR_GAIN = 1  # 4x
 # color_integration_time: 1-256 cycles of 2.78ms (256=712ms max)
 # 16 cycles (~44ms) keeps the color engine responsive. Do NOT raise the gain to
-# "compensate" for the short integration: the ADC full-scale ceiling scales with
-# integration time, so the fill fraction depends on gain alone. At 16x the clear
-# channel saturated (railed at ~16384), flattening brightness and hue. 4x keeps
-# clear comfortably below full-scale at this integration time.
-# NOTE: changing gain or integration time changes the raw R/G/B/C scale, so
-# color_map.json MUST be regenerated (run color_calibration.py) after editing these.
+# "compensate" for the short integration: full-scale count is 1024 * cycles, so
+# at 16 cycles the ADC rails at 16384 -- and because the accumulated counts and
+# that ceiling both scale with integration time, the fill fraction depends on
+# gain alone. Lowering integration time does not cure saturation, it only costs
+# resolution. At 16x the clear channel railed, flattening brightness. 4x keeps
+# clear below full-scale at this integration time.
+#
+# This is deliberately not per-sensor: COLOR_READ_TIMEOUT and the poll loop
+# assume one integration period for every sensor.
 COLOR_INTEGRATION_TIME = 16
 # Max seconds to wait for a completed integration before reading color data.
 COLOR_READ_TIMEOUT = 0.1
 # How often the master polls all sensors and pushes to the display (seconds).
 # Reads are cheap, so a short interval keeps input latency low.
 SENSOR_POLL_INTERVAL_SECONDS = 0.3
+
+def color_gain_for(channel):
+    """The gain setting for one sensor channel.
+
+    COLOR_GAIN is either a single value shared by every sensor or a list of
+    NUM_SENSORS values, one per channel.
+    """
+    if isinstance(COLOR_GAIN, (list, tuple)):
+        if len(COLOR_GAIN) != NUM_SENSORS:
+            raise ValueError(
+                "COLOR_GAIN has {} entries but there are {} sensors; give one "
+                "value per sensor or a single value for all of them".format(
+                    len(COLOR_GAIN), NUM_SENSORS))
+        return COLOR_GAIN[channel]
+    return COLOR_GAIN
+
+
+def color_gain_list():
+    """Gain per channel, always as a list -- what gets recorded in color_map.json."""
+    return [color_gain_for(ch) for ch in range(NUM_SENSORS)]
+
 
 # Ligand color names matching the simulation's color indices (0-5)
 LIGAND_COLORS = ["Red", "Blue", "Green", "Purple", "Orange", "Yellow"]

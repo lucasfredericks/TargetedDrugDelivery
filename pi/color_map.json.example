@@ -1,5 +1,16 @@
 {
   "_comment": "EXAMPLE ONLY -- nominal values, not a calibration. Copied in as a fallback so the service boots on a fresh clone; color matching will be poor until you run color_calibration.py, which writes the real color_map.json (gitignored). See OPERATIONS.md, 'Installation state'.",
+  "settings": {
+    "color_gain": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "color_integration_time": 16
+  },
   "sensors": {
     "0": {
       "Red": {

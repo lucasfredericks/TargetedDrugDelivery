@@ -19,7 +19,8 @@ from adafruit_apds9960.apds9960 import APDS9960
 from config import (
     MUX_ADDRESS, NUM_SENSORS, LIGAND_COLORS, COLOR_MAP_PATH,
     COLOR_MAP_EXAMPLE_PATH, COLOR_NONE,
-    COLOR_GAIN, COLOR_INTEGRATION_TIME, COLOR_READ_TIMEOUT
+    COLOR_INTEGRATION_TIME, COLOR_READ_TIMEOUT,
+    color_gain_for, color_gain_list,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class SensorService:
         for channel in range(NUM_SENSORS):
             try:
                 sensor = APDS9960(self.mux[channel])
-                sensor.color_gain = COLOR_GAIN
+                sensor.color_gain = color_gain_for(channel)
                 sensor.color_integration_time = COLOR_INTEGRATION_TIME
                 sensor.enable_color = True
                 # Proximity is intentionally left off: color matching never uses
@@ -56,7 +57,9 @@ class SensorService:
                 # pulses every cycle, slowing the color reads. It is enabled
                 # lazily by read_proximity() for the debug/test path only.
                 self.sensors.append(sensor)
-                logger.info("Initialized APDS-9960 on mux channel %d", channel)
+                logger.info("Initialized APDS-9960 on mux channel %d "
+                            "(gain=%d, integration=%d)", channel,
+                            color_gain_for(channel), COLOR_INTEGRATION_TIME)
             except Exception as e:
                 logger.error("Failed to init sensor on channel %d: %s", channel, e)
                 self.sensors.append(None)
@@ -80,13 +83,13 @@ class SensorService:
             if fallback is None or "sensors" not in fallback:
                 logger.error(
                     "color_map.json %s at %s and the example fallback at %s is "
-                    "missing or unusable — no color matching is possible. "
+                    "missing or unusable -- no color matching is possible. "
                     "Run color_calibration.py.",
                     why, COLOR_MAP_PATH, COLOR_MAP_EXAMPLE_PATH)
                 self.sensor_color_maps = {}
                 return
             logger.warning(
-                "USING EXAMPLE COLOR CALIBRATION — color_map.json %s at %s. "
+                "USING EXAMPLE COLOR CALIBRATION -- color_map.json %s at %s. "
                 "Colors will be matched badly. Restore this device's "
                 "calibration with 'python installation_config.py restore', or "
                 "re-run color_calibration.py.",
@@ -94,6 +97,8 @@ class SensorService:
             data = fallback
 
         self.sensor_color_maps = {}
+
+        self._check_settings(data)
 
         self.clear_max = {}
         for ch_str, val in data.get("clear_max", {}).items():
@@ -113,6 +118,42 @@ class SensorService:
 
         logger.info("Loaded per-sensor color maps for %d sensors",
                      len(self.sensor_color_maps))
+
+    @staticmethod
+    def _check_settings(data):
+        """Warn if this calibration was taken at different sensor settings.
+
+        Gain and integration time set the raw RGBC scale, so a calibration
+        taken at other settings mismatches every reference value in it -- and
+        it fails silently, as steadily worse matching rather than an error.
+        That matters more now a calibration can be restored from a snapshot
+        onto a Pi whose config.py has moved on since.
+        """
+        recorded = data.get("settings")
+        if not recorded:
+            logger.warning(
+                "color_map.json records no gain/integration settings, so they "
+                "cannot be checked against config.py. Re-run "
+                "color_calibration.py to record them.")
+            return
+
+        want_gain = color_gain_list()
+        got_gain = recorded.get("color_gain")
+        if isinstance(got_gain, int):
+            got_gain = [got_gain] * NUM_SENSORS
+        if got_gain != want_gain:
+            logger.warning(
+                "COLOR MAP / CONFIG MISMATCH: calibrated at color_gain=%s but "
+                "config.py now says %s. Gain sets the raw RGBC scale, so every "
+                "reference value in color_map.json is off. Re-run "
+                "color_calibration.py.", got_gain, want_gain)
+
+        got_time = recorded.get("color_integration_time")
+        if got_time != COLOR_INTEGRATION_TIME:
+            logger.warning(
+                "COLOR MAP / CONFIG MISMATCH: calibrated at "
+                "color_integration_time=%s but config.py now says %s. Re-run "
+                "color_calibration.py.", got_time, COLOR_INTEGRATION_TIME)
 
     @staticmethod
     def _read_color_map_file(path):
