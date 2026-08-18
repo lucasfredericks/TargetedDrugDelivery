@@ -34,6 +34,84 @@ Software:
 - Arduino IDE (for uploading firmware to the Uno)
 
 
+Step 0: Git Access
+-------------------
+
+The exhibit lives in a git repository on the Pi at ~/TargetedDrugDelivery. The
+Pi pulls code from it *and pushes its own installation state* back to it -- the
+color calibration and the tag pairings, see OPERATIONS.md, "Installation
+state". So the Pi needs write access, not just read.
+
+GitHub stopped accepting account passwords for git operations in August 2021.
+An HTTPS remote on the Pi fails with:
+
+    remote: Support for password authentication was removed.
+
+Use an SSH deploy key. A deploy key is scoped to this one repository, does not
+expire, carries none of your account's other access, and can be revoked on its
+own -- all of which is what you want for a machine sitting in a gallery.
+
+1. On the Pi, generate a key with no passphrase, so unattended pushes work:
+
+       ssh-keygen -t ed25519 -C "tdd-exhibit-pi" -f ~/.ssh/id_ed25519_tdd -N ""
+       cat ~/.ssh/id_ed25519_tdd.pub
+
+2. On GitHub, go to the repository -> Settings -> Deploy keys -> Add deploy
+   key. Paste the public key, title it something like "exhibit pi", and tick
+   **Allow write access**. The write tick is what lets the Pi back up its
+   calibration and pairings; without it, pulls work and `save --push` fails.
+
+3. Back on the Pi, point ssh at that key for github.com:
+
+       cat >> ~/.ssh/config <<'CONF'
+       Host github.com
+         HostName github.com
+         User git
+         IdentityFile ~/.ssh/id_ed25519_tdd
+         IdentitiesOnly yes
+       CONF
+       chmod 600 ~/.ssh/config
+
+4. Clone over SSH, or switch an existing HTTPS clone across:
+
+       # first install
+       git clone git@github.com:lucasfredericks/TargetedDrugDelivery.git ~/TargetedDrugDelivery
+
+       # existing clone that was set up over HTTPS
+       cd ~/TargetedDrugDelivery
+       git remote set-url origin git@github.com:lucasfredericks/TargetedDrugDelivery.git
+
+5. Confirm it works. The greeting names the repository, not your account --
+   that is what a deploy key looks like:
+
+       ssh -T git@github.com
+       # Hi lucasfredericks/TargetedDrugDelivery! You've successfully
+       # authenticated, but GitHub does not provide shell access.
+
+       cd ~/TargetedDrugDelivery && git pull
+
+Do all of this with the read-only overlay disabled, or ~/.ssh will not survive
+the next reboot. See OPERATIONS.md, "Making changes when the root is
+read-only".
+
+### If you would rather not give the Pi write access
+
+Use a fine-grained personal access token limited to this one repository with
+Contents: read and write, and let git remember it:
+
+    git config --global credential.helper store
+    git pull        # paste the token as the password, once
+
+Two tradeoffs. Tokens expire, and when one does the exhibit quietly stops
+backing up its state -- a deploy key does not expire. And the token is written
+in plaintext to ~/.git-credentials, so it must be a repo-scoped token, never an
+account password.
+
+The scripts run git with prompting disabled, so a missing or expired
+credential fails immediately with a message rather than hanging the Pi on an
+invisible password prompt.
+
+
 Step 1: Enable I2C on the Pi
 -----------------------------
 

@@ -15,7 +15,8 @@ display.
 | I want to… | Read |
 |---|---|
 | Understand what the exhibit is and how the parts fit | this page |
-| Wire and install the Pi master (sensors, Arduino, software) | [pi/SETUP.md](../pi/SETUP.md), steps 1–5 |
+| Give the Pi git access (deploy key) | [pi/SETUP.md](../pi/SETUP.md) → "Step 0: Git Access" |
+| Wire and install the Pi master (sensors, Arduino, software) | [pi/SETUP.md](../pi/SETUP.md), steps 0–5 |
 | Configure it (network, color calibration, puzzles & RFID tags) | [pi/SETUP.md](../pi/SETUP.md), steps 6–8 |
 | Set up a simulation PC kiosk (browser, Skia Graphite, Deep Freeze) | [simulation_pc/SETUP.md](../simulation_pc/SETUP.md) |
 | Open, close, and run the exhibit day to day | [pi/OPERATIONS.md](../pi/OPERATIONS.md) |
