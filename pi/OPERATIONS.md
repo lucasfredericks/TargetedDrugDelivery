@@ -139,6 +139,118 @@ Check the service came back:
     systemctl status tdd-exhibit
     journalctl -u tdd-exhibit -n 30
 
+The color calibration and the tag pairings are not touched by any of this. They
+live in gitignored files — see "Installation state" below — so a pull cannot
+overwrite them and you never have to recalibrate after a deploy.
+
+
+Trying a branch on the Pi
+-------------------------
+
+Because the calibration and pairings are gitignored, switching branches is safe:
+git has no tracked copy of either file on any branch, so it has nothing to
+restore over them.
+
+    cd ~/TargetedDrugDelivery
+    git fetch origin
+    git checkout beta          # or: git checkout main, to go back
+    sudo systemctl restart tdd-exhibit
+
+Reload the four screens if anything under `concept_development/` changed. Run
+`python pi/installation_config.py status` afterwards if you want the
+confirmation in writing — it reports whether both files are still present and
+still ignored.
+
+The overlay rule still applies: check out the branch with the overlay disabled,
+or the checkout itself is discarded at the next reboot.
+
+### Branches that predate this change
+
+Only branches that carry the gitignore change are safe to hop between. On an
+older branch these two files are still tracked, and git will overwrite the live
+ones with the placeholders from that branch — silently, with no warning and no
+prompt, because as far as git is concerned it is just checking out a tracked
+file. Switching back does not undo it.
+
+Before checking out a branch you are unsure about:
+
+    python pi/installation_config.py save --push    # so there is a snapshot
+    git checkout <branch>
+    python pi/installation_config.py status         # says if the files are tracked here
+
+If status reports `NO -- still tracked!`, the calibration and pairings on disk
+came from that branch, not from this installation. Get yours back with:
+
+    python pi/installation_config.py restore
+
+The cheap habit that makes all of this moot: run `save` before any checkout.
+
+
+Installation state
+------------------
+
+Two files belong to this specific installation rather than to the code:
+
+    pi/color_map.json        color calibration, written by color_calibration.py
+    pi/puzzles/index.json    RFID tag pairings, written by the /admin dashboard
+
+Both are gitignored. They used to be tracked, which meant a branch switch or an
+awkward pull could quietly replace a real calibration with the placeholder in
+git, and recalibrating was the only way back. Now no code branch contains them
+at all, so nothing git does can touch them.
+
+That also means git is no longer backing them up, and an SD reimage would take
+them with it. `installation_config.py` is the backup. It snapshots both files
+onto an orphan branch, `installation-state`, checked out in a worktree beside
+the repo. That branch is never merged into a code branch — it cannot cause a
+conflict — but it does push to origin, so the snapshot survives a reimage and
+can be read from any other clone.
+
+Snapshots are per-hostname, so more than one device can share the branch.
+
+    cd ~/TargetedDrugDelivery/pi
+
+    python installation_config.py status          # what is live, is it snapshotted
+    python installation_config.py save --push     # after calibrating or pairing
+    python installation_config.py restore         # after a reimage or fresh clone
+    python installation_config.py list            # snapshots from all devices
+
+`save` refuses to snapshot a file that still looks like a placeholder, so it
+will not overwrite good state with junk; `--force` overrides. `restore` leaves
+the file it replaced beside the original as `.bak-<timestamp>`.
+
+**Run `save` after every calibration and every tag pairing.** Nothing does it
+for you, and until you do, the change exists only on that SD card.
+
+If either file is missing, the service still starts. Tag lookups just fail until
+you pair tags, and color matching falls back to `color_map.json.example` with a
+loud warning in the log:
+
+    USING EXAMPLE COLOR CALIBRATION — color_map.json not found ...
+
+That is a fresh clone or a failed restore talking, not a sensor fault.
+
+### Migrating a Pi that predates this
+
+A Pi set up before this change has both files tracked with local edits, so the
+first pull will conflict. Take a copy before you pull:
+
+    cd ~/TargetedDrugDelivery
+    mkdir -p ~/tdd-state-backup
+    cp pi/color_map.json pi/puzzles/index.json ~/tdd-state-backup/
+
+    git checkout -- pi/color_map.json pi/puzzles/index.json   # let the pull run clean
+    git pull
+
+    cp ~/tdd-state-backup/color_map.json pi/
+    cp ~/tdd-state-backup/index.json pi/puzzles/
+
+    python pi/installation_config.py status       # expect: calibrated, paired, ignored
+    python pi/installation_config.py save --push
+
+Do this with the overlay disabled. Once `save` has run, `~/tdd-state-backup` is
+redundant and can be deleted.
+
 
 Making changes when the root is read-only
 -----------------------------------------
@@ -175,14 +287,15 @@ that needs committing.
    - Code: `git pull` (see "Deploying a change").
    - Calibration: `color_calibration.py`, which rewrites `color_map.json`.
 
-3. Commit anything that must outlive a reimage. The mappings and the calibration
-   are device state, not part of the base image, so an uncommitted change is as
-   good as lost:
+3. Snapshot anything that must outlive a reimage. The mappings and the
+   calibration are device state, not part of the base image, and they are
+   gitignored — so an unsnapshotted change is as good as lost:
 
        cd ~/TargetedDrugDelivery/pi
-       git add puzzles/index.json color_map.json
-       git commit -m "Remap tag ..."
-       git push        # if this Pi has a remote configured
+       python installation_config.py save --push -m "Remap tag ..."
+
+   Do not try to `git add` these files on a code branch; git is ignoring them
+   on purpose. See "Installation state" above.
 
 4. Turn the overlay back on. This is the step that restores the unplug
    hardening, so treat it as part of the job — a Pi left with the overlay off is
@@ -205,4 +318,4 @@ that needs committing.
 - The server writes `index.json` atomically, so a power loss can never leave it
   half-written. That is separate from the overlay problem: a dashboard save with
   the overlay on is complete and valid, and still gone at the next reboot.
-  Committing is what makes it stick.
+  Snapshotting it with `installation_config.py save` is what makes it stick.
